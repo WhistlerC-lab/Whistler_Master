@@ -845,16 +845,16 @@ async function fetchPositioning(symbol, period='4h') {
       이전 값과 비교해 변화가 생기면 카드가 색상별로 깜빡이는 효과를 줌
 ═══════════════════════════════════════════ */
 const FLOW_CFG = { DEPTH_LIMIT: 20, WALL_MULT: 5 };
-const FLOW_REFRESH_MS = 12 * 1000; // 12초마다 실시간 갱신
+const FLOW_REFRESH_MS = 6 * 1000; // 6초마다 실시간 갱신 (API 가중치 여유 충분 — 분당 약 120건 수준)
 const SAPI = 'https://api.binance.com'; // 현물(spot) 시장 API — BTC/ETH 현물-선물 비교 전용
 let flowTimer = null;
 let flowTargets = [];
 let flowPrevData = {}; // sym -> { imbalance, bidWall, askWall } (직전 값, 변화 감지용)
 
 // ── "속도(velocity)" 개념: 단순 방향(상승/하락)을 넘어 "갑자기 확 변하는" 움직임을 감지 ──
-// 1) 오더북 임밸런스: 12초마다 갱신되는 실제 실시간 데이터 → 최근 N회 추이를 누적해 "단기 급변" 감지
+// 1) 오더북 임밸런스: 6초마다 갱신되는 실제 실시간 데이터 → 최근 N회 추이를 누적해 "단기 급변" 감지
 // 2) CVD/체결 매수비중: 스캔 주기(약 15~30분)마다 갱신 → "직전 스캔 대비 급증/급감" 감지
-const FLOW_IMB_HISTORY_LEN = 5;     // 최근 5회(=약 1분) 임밸런스 추이를 비교
+const FLOW_IMB_HISTORY_LEN = 10;    // 최근 10회(=6초×10=약 1분) 임밸런스 추이를 비교 — 갱신 주기가 빨라진 만큼 표본 수를 늘려 "약 1분" 창을 유지
 const FLOW_IMB_SURGE_DELTA = 0.18;  // 1분 새 임밸런스가 ±18%p 이상 움직이면 "급변"으로 간주
 const FLOW_CVD_SURGE_DELTA = 0.12;  // 직전 스캔 대비 체결 매수비중이 ±12%p 이상 움직이면 "급증/급감"
 let flowImbHistory = {};  // sym -> [imbalance, ...] 최근 값 누적 (단기 속도 감지용)
