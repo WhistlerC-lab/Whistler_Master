@@ -121,7 +121,7 @@
   /* ── MODAL ── */
   .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.7); z-index: 100; align-items: center; justify-content: center; }
   .modal-overlay.show { display: flex; }
-  .modal { background: var(--bg2); border: 1px solid var(--bd); border-radius: 10px; padding: 20px; width: 400px; max-width: 90vw; }
+  .modal { background: var(--bg2); border: 1px solid var(--bd); border-radius: 10px; padding: 20px; width: 400px; max-width: 90vw; max-height: 88vh; overflow-y: auto; }
   .modal-title { font-size: 14px; font-weight: 700; margin-bottom: 16px; }
   .modal-close { float: right; cursor: pointer; color: var(--tx3); font-size: 18px; line-height: 1; }
   .modal-close:hover { color: var(--tx1); }
@@ -145,6 +145,7 @@
   <div class="logo">WHISTLER MASTER <span>v1.0</span></div>
   <div class="regime-pill rp-neut" id="hRegime">—</div>
   <span style="font-size:11px;color:var(--tx3)" id="hRegimeScore"></span>
+  <span style="font-size:11px;color:var(--tx3);margin-left:8px;padding:3px 10px;border-radius:20px;background:rgba(255,255,255,.04);border:1px solid var(--bd)" id="hFxRate">💱 환율 로딩중…</span>
   <div class="header-right">
     <button class="btn" onclick="openSettings()">⚙️ 설정</button>
     <button class="btn primary" id="startBtn" onclick="toggleAuto()">▶ 자동 스캔 시작</button>
@@ -211,21 +212,12 @@
     <!-- Telegram -->
     <div class="sidebar-section">
       <div class="sec-title">텔레그램 알림</div>
-      <div class="form-row">
-        <label>Bot Token</label>
-        <input type="text" id="tgToken" placeholder="1234567890:AABBcc...">
-      </div>
-      <div class="form-row">
-        <label>Chat ID</label>
-        <input type="text" id="tgChat" placeholder="7151485201">
-      </div>
       <div class="auto-row">
         <input type="checkbox" id="tgAutoCb" checked>
         <label for="tgAutoCb">스캔 후 자동 발송</label>
       </div>
-      <div style="margin-top:8px;display:flex;gap:6px">
-        <button class="btn" style="flex:1;font-size:11px" onclick="testTelegram()">테스트</button>
-        <button class="btn" style="flex:1;font-size:11px" onclick="saveTgSettings()">저장</button>
+      <div style="font-size:11px;color:var(--tx3);margin-top:6px">
+        Bot Token / Chat ID는 ⚙️ <a href="#" onclick="openSettings();return false;" style="color:var(--accent)">설정</a>에서 관리합니다.
       </div>
       <div class="tg-status" id="tgStatus"></div>
     </div>
@@ -268,6 +260,17 @@
       </div>
     </div>
 
+    <!-- Change summary -->
+    <div>
+      <div class="section-hd">
+        <h2>📊 변화 요약</h2>
+        <div class="badge" id="changeBadge">—</div>
+      </div>
+      <div style="background:var(--bg2);border:1px solid var(--bd);border-radius:8px;padding:14px" id="changeBox">
+        <div class="empty" style="padding:14px"><div class="empty-icon">📭</div><div>2회 이상 스캔 후 비교가 표시됩니다</div></div>
+      </div>
+    </div>
+
     <!-- AI Summary -->
     <div>
       <div class="section-hd">
@@ -301,6 +304,24 @@
       <button class="btn" style="flex:1" onclick="testGeminiKey()">연결 테스트</button>
     </div>
     <div style="font-size:11px;color:var(--tx3);margin-top:6px" id="geminiTestResult"></div>
+
+    <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--bd)">
+      <div class="sec-title" style="margin-bottom:8px">텔레그램 알림</div>
+      <div class="form-row">
+        <label>Bot Token</label>
+        <input type="text" id="tgToken" placeholder="1234567890:AABBcc...">
+      </div>
+      <div class="form-row">
+        <label>Chat ID</label>
+        <input type="text" id="tgChat" placeholder="7151485201">
+      </div>
+      <div style="display:flex;gap:8px;margin-top:4px">
+        <button class="btn primary" style="flex:1" onclick="saveTgSettings()">저장</button>
+        <button class="btn" style="flex:1" onclick="testTelegram()">테스트 발송</button>
+      </div>
+      <div class="tg-status" id="tgStatusModal"></div>
+    </div>
+
     <div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--bd)">
       <button class="btn" style="width:100%;font-size:11px" onclick="closeSettings()">닫기</button>
     </div>
@@ -316,6 +337,34 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 let running = false, stopFlag = false;
 let autoTimer = null, countdownTimer = null, nextScanAt = 0;
 let regimeScore = null;
+let fxRate = null; // USD -> KRW
+
+/* ═══════════════════════════════════════════
+   FX RATE (USD/KRW)
+═══════════════════════════════════════════ */
+async function fetchFxRate() {
+  const el = document.getElementById('hFxRate');
+  try {
+    const data = await fetchJSON('https://open.er-api.com/v6/latest/USD');
+    const rate = data?.rates?.KRW;
+    if (rate) {
+      fxRate = rate;
+      el.textContent = `💱 $1 = ₩${rate.toLocaleString('ko', {maximumFractionDigits:1})}`;
+      el.title = '환율 갱신: ' + new Date().toLocaleTimeString('ko');
+    } else {
+      el.textContent = '💱 환율 조회 실패';
+    }
+  } catch (e) {
+    el.textContent = '💱 환율 조회 실패';
+  }
+}
+function krw(usdAmount) {
+  if (!fxRate || !isFinite(usdAmount)) return '';
+  const v = usdAmount * fxRate;
+  if (v >= 100000000) return `₩${(v/100000000).toFixed(2)}억`;
+  if (v >= 10000) return `₩${(v/10000).toFixed(1)}만`;
+  return `₩${Math.round(v).toLocaleString('ko')}`;
+}
 let lastResults = [];
 
 /* ═══════════════════════════════════════════
@@ -365,8 +414,10 @@ function loadTgSettings() {
   if (!c) document.getElementById('tgChat').value  = '7151485201';
 }
 function setTgStatus(msg, color='var(--tx3)') {
-  const el = document.getElementById('tgStatus');
-  if (el) { el.textContent = msg; el.style.color = color; }
+  ['tgStatus','tgStatusModal'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { el.textContent = msg; el.style.color = color; }
+  });
 }
 function toggleReport() {
   const el = document.getElementById('reportPreview');
@@ -595,9 +646,10 @@ function deepScore(t1d, t4h, t1h, regScore) {
    TP/SL CALCULATOR
 ═══════════════════════════════════════════ */
 function calcTpSl(entry, atr, dir) {
-  const sl  = dir==='long' ? entry-atr*1.5 : entry+atr*1.5;
-  const tp1 = dir==='long' ? entry+atr*2.0 : entry-atr*2.0;
-  const tp2 = dir==='long' ? entry+atr*3.5 : entry-atr*3.5;
+  // 단기(15~30분 스캔) 10x 레버리지 매매에 맞춘 근접 목표 (RRR은 기존과 동일하게 유지)
+  const sl  = dir==='long' ? entry-atr*1.0 : entry+atr*1.0;
+  const tp1 = dir==='long' ? entry+atr*1.0 : entry-atr*1.0;
+  const tp2 = dir==='long' ? entry+atr*2.0 : entry-atr*2.0;
   const rrr1 = (Math.abs(tp1-entry)/Math.abs(entry-sl)).toFixed(1);
   return { sl, tp1, tp2, rrr1 };
 }
@@ -816,6 +868,7 @@ async function loadMacro() {
           <div class="mc-price">$${fmtP(price)}</div>
           <div class="mc-chg ${chg>=0?'pos':'neg'}">${chg>=0?'+':''}${chg.toFixed(2)}%</div>
         </div>
+        ${fxRate?`<div style="font-size:11px;color:var(--tx3);margin-top:1px">${krw(price)}</div>`:''}
         <div style="font-size:12px;color:var(--tx2);margin-top:6px">${trend}</div>
         <div class="mc-stats">
           <div class="mc-stat"><div class="mc-stat-label">RSI(14)</div><div class="mc-stat-val" style="color:${t?.rsi>70?'var(--red)':t?.rsi<30?'var(--green)':'var(--tx1)'}">${t?.rsi?.toFixed(1)||'—'}</div></div>
@@ -850,6 +903,10 @@ function renderCandidates(results) {
       <td><span class="rank-icon">${icons[idx]||'•'}</span></td>
       <td><div class="sym-name">${r.sym.replace('USDT','')}</div><div style="font-size:10px;color:var(--tx3)">${r.chg>=0?'+':''}${r.chg.toFixed(2)}%</div></td>
       <td>
+        <div style="font-weight:600">$${fmtP(r.price)}</div>
+        ${fxRate?`<div style="font-size:10px;color:var(--tx3)">${krw(r.price)}</div>`:''}
+      </td>
+      <td>
         <div class="score-bar-wrap">
           <div class="score-bar" style="width:${Math.round((r.finalScore/Math.max(MAX_SCORE,1))*80+20)}px"></div>
           <span class="score-num" style="color:${r.finalScore>=60?'var(--green)':r.finalScore>=40?'var(--gold)':'var(--tx2)'}">${r.finalScore}</span>
@@ -876,15 +933,111 @@ function renderCandidates(results) {
     </tr>`;
   });
   document.getElementById('candTable').innerHTML = `<table class="cand-table">
-    <thead><tr><th>#</th><th>심볼</th><th>점수</th><th>TF정렬</th><th>TP / SL</th></tr></thead>
+    <thead><tr><th>#</th><th>심볼</th><th>현재가</th><th>점수</th><th>TF정렬</th><th>TP / SL</th></tr></thead>
     <tbody>${rows.join('')}</tbody>
   </table>`;
 }
 
 /* ═══════════════════════════════════════════
+   CHANGE SUMMARY (직전 스캔 대비 + 24시간 대비)
+═══════════════════════════════════════════ */
+const HIST_KEY = 'wm_scan_history';
+const HIST_MAX_AGE = 26 * 60 * 60 * 1000; // 26시간 (24h 비교용 여유분 포함)
+
+function loadScanHistory() {
+  try { return JSON.parse(localStorage.getItem(HIST_KEY) || '[]'); } catch(e) { return []; }
+}
+function saveScanSnapshot(regimeData, topCandidates) {
+  let hist = loadScanHistory();
+  const now = Date.now();
+  hist.push({
+    ts: now,
+    regimeScore: regimeData?.score ?? null,
+    candidates: topCandidates.filter(r=>r.lsc>10).slice(0,10).map(r => ({ sym:r.sym, score:r.finalScore }))
+  });
+  hist = hist.filter(h => now - h.ts <= HIST_MAX_AGE);
+  localStorage.setItem(HIST_KEY, JSON.stringify(hist));
+  return hist;
+}
+function findClosestSnapshot(hist, targetTs, maxDrift) {
+  let best = null, bestDiff = Infinity;
+  for (const h of hist) {
+    const diff = Math.abs(h.ts - targetTs);
+    if (diff < bestDiff && diff <= maxDrift) { best = h; bestDiff = diff; }
+  }
+  return best;
+}
+function diffSnapshots(curr, prev) {
+  if (!prev) return null;
+  const prevMap = new Map(prev.candidates.map(c => [c.sym, c.score]));
+  const currMap = new Map(curr.candidates.map(c => [c.sym, c.score]));
+  const newcomers = curr.candidates.filter(c => !prevMap.has(c.sym)).map(c=>c.sym);
+  const dropped   = prev.candidates.filter(c => !currMap.has(c.sym)).map(c=>c.sym);
+  const movers = curr.candidates
+    .filter(c => prevMap.has(c.sym))
+    .map(c => ({ sym:c.sym, from:prevMap.get(c.sym), to:c.score, delta:c.score-prevMap.get(c.sym) }))
+    .filter(m => m.delta !== 0)
+    .sort((a,b)=>Math.abs(b.delta)-Math.abs(a.delta));
+  const regimeDelta = (curr.regimeScore!=null && prev.regimeScore!=null) ? curr.regimeScore - prev.regimeScore : null;
+  return { newcomers, dropped, movers, regimeDelta, prevTs: prev.ts };
+}
+function fmtAgo(ts) {
+  const mins = Math.round((Date.now()-ts)/60000);
+  if (mins < 60) return `${mins}분 전`;
+  return `${(mins/60).toFixed(1)}시간 전`;
+}
+function renderChangeBlock(label, d) {
+  if (!d) return `<div style="color:var(--tx3);font-size:12px">${label}: 비교 데이터 없음 (스캔 누적 대기 중)</div>`;
+  const parts = [];
+  if (d.regimeDelta !== null && d.regimeDelta !== 0) {
+    parts.push(`<span style="color:${d.regimeDelta>0?'var(--green)':'var(--red)'}">레짐 ${d.regimeDelta>0?'+':''}${d.regimeDelta}점</span>`);
+  }
+  if (d.newcomers.length) parts.push(`<span style="color:var(--green)">신규 진입: ${d.newcomers.join(', ')}</span>`);
+  if (d.dropped.length) parts.push(`<span style="color:var(--red)">탈락: ${d.dropped.join(', ')}</span>`);
+  if (d.movers.length) {
+    const top = d.movers.slice(0,4).map(m=>`${m.sym.replace('USDT','')} ${m.delta>0?'▲':'▼'}${Math.abs(m.delta)}`).join(', ');
+    parts.push(`<span style="color:var(--tx2)">점수 변동: ${top}</span>`);
+  }
+  if (!parts.length) parts.push('<span style="color:var(--tx3)">유의미한 변화 없음</span>');
+  return `<div style="font-size:12px;line-height:1.7"><b style="color:var(--tx1)">${label}</b> <span style="color:var(--tx3);font-size:10px">(${fmtAgo(d.prevTs)} 비교)</span><br>${parts.join(' · ')}</div>`;
+}
+function buildChangeSummary(regimeData, topCandidates) {
+  const hist = saveScanSnapshot(regimeData, topCandidates);
+  const curr = hist[hist.length-1];
+  const prevScan = hist.length >= 2 ? hist[hist.length-2] : null;
+  const prev24h = hist.length >= 2 ? findClosestSnapshot(hist.slice(0,-1), curr.ts - 24*60*60*1000, 3*60*60*1000) : null;
+
+  const dScan = diffSnapshots(curr, prevScan);
+  const d24h  = (prev24h && prev24h.ts !== prevScan?.ts) ? diffSnapshots(curr, prev24h) : null;
+
+  document.getElementById('changeBadge').textContent = `누적 ${hist.length}건`;
+  const box = document.getElementById('changeBox');
+  if (!dScan && !d24h) {
+    box.innerHTML = `<div class="empty" style="padding:14px"><div class="empty-icon">📭</div><div>2회 이상 스캔 후 비교가 표시됩니다</div></div>`;
+  } else {
+    box.innerHTML = [
+      renderChangeBlock('🔄 직전 스캔 대비', dScan),
+      d24h ? `<div style="height:1px;background:var(--bd);margin:10px 0"></div>${renderChangeBlock('🕐 24시간 전 대비', d24h)}` : ''
+    ].join('');
+  }
+
+  // AI/텔레그램용 텍스트 요약
+  function toText(label, d) {
+    if (!d) return null;
+    const bits = [];
+    if (d.regimeDelta) bits.push(`레짐 ${d.regimeDelta>0?'+':''}${d.regimeDelta}점`);
+    if (d.newcomers.length) bits.push(`신규: ${d.newcomers.map(s=>s.replace('USDT','')).join(',')}`);
+    if (d.dropped.length) bits.push(`탈락: ${d.dropped.map(s=>s.replace('USDT','')).join(',')}`);
+    if (d.movers.length) bits.push(`변동: ${d.movers.slice(0,3).map(m=>`${m.sym.replace('USDT','')}${m.delta>0?'+':''}${m.delta}`).join(',')}`);
+    return bits.length ? `${label}: ${bits.join(' / ')}` : `${label}: 변화 없음`;
+  }
+  return [toText('직전 스캔 대비', dScan), toText('24시간 전 대비', d24h)].filter(Boolean).join('\n');
+}
+
+/* ═══════════════════════════════════════════
    GEMINI AI SUMMARY
 ═══════════════════════════════════════════ */
-async function generateAISummary(regimeData, macroCoins, topCandidates) {
+async function generateAISummary(regimeData, macroCoins, topCandidates, changeText) {
   const el = document.getElementById('aiResult');
   el.className = 'ai-result loading';
   el.textContent = '🤖 Gemini AI 종합 결론 생성 중...';
@@ -918,11 +1071,15 @@ async function generateAISummary(regimeData, macroCoins, topCandidates) {
 ## 롱 후보 TOP ${top5.length}
 ${candLines || '없음'}
 
+## 직전/24시간 대비 변화
+${changeText || '비교 데이터 없음 (누적 중)'}
+
 ## 요청
-다음 3가지를 각각 2~3문장으로 작성해주세요:
+다음 4가지를 각각 2~3문장으로 작성해주세요:
 1. 📊 현재 시장 종합 판단 (지금 공격적으로 들어갈 때인지, 관망해야 하는지)
 2. ₿ BTC/ETH 단기 방향성 및 주의 포인트
-3. 🎯 가장 유망한 롱 진입 후보 1~2개와 그 이유 (없으면 '진입 보류' 명시)`;
+3. 🎯 가장 유망한 롱 진입 후보 1~2개와 그 이유 (없으면 '진입 보류' 명시)
+4. 🔄 직전/24시간 대비 변화에서 주목할 점 (변화가 의미하는 시장 흐름, 없으면 '특이사항 없음' 명시)`;
 
   const result = await callGemini(prompt);
   el.className = 'ai-result';
@@ -1012,7 +1169,7 @@ async function testTelegram() {
 /* ═══════════════════════════════════════════
    BUILD & SEND REPORT
 ═══════════════════════════════════════════ */
-function buildReport(regimeData, macroCoins, topCandidates, aiSummary) {
+function buildReport(regimeData, macroCoins, topCandidates, aiSummary, changeText) {
   const kst=new Date(Date.now()+9*3600000).toISOString().replace('T',' ').slice(0,16);
   const regLabel=regimeData?(regimeData.score<=-30?'🔴 하락장':regimeData.score>=30?'🟢 상승장':'⚪ 박스권'):'—';
   const btc=macroCoins.find(c=>c.sym==='BTC');
@@ -1041,6 +1198,10 @@ function buildReport(regimeData, macroCoins, topCandidates, aiSummary) {
     msg += `🎯 <b>롱 후보</b>: 현재 조건 충족 없음\n`;
   }
 
+  if (changeText) {
+    msg += `\n📊 <b>변화 요약</b>\n<code>${changeText}</code>\n`;
+  }
+
   if (aiSummary) {
     msg += `\n🤖 <b>AI 종합 결론</b>\n${aiSummary.slice(0,600)}`;
     if (aiSummary.length > 600) msg += '…';
@@ -1052,9 +1213,9 @@ function buildReport(regimeData, macroCoins, topCandidates, aiSummary) {
   return msg;
 }
 
-async function sendReport(regimeData, macroCoins, topCandidates, aiSummary) {
+async function sendReport(regimeData, macroCoins, topCandidates, aiSummary, changeText) {
   if (!document.getElementById('tgAutoCb').checked) return;
-  const msg = buildReport(regimeData, macroCoins, topCandidates, aiSummary);
+  const msg = buildReport(regimeData, macroCoins, topCandidates, aiSummary, changeText);
   document.getElementById('reportPreview').textContent = msg;
   document.getElementById('reportPreview').classList.add('show');
   await sendTelegram(msg);
@@ -1079,7 +1240,7 @@ async function runScan() {
   document.getElementById('startBtn').classList.add('run');
   log('═══ 스캔 시작 ═══');
 
-  let regimeData = null, macroCoins = [], topCandidates = [], aiSummary = '';
+  let regimeData = null, macroCoins = [], topCandidates = [], aiSummary = '', changeText = '';
 
   try {
     // Stage 1: Regime
@@ -1097,14 +1258,18 @@ async function runScan() {
     if (stopFlag) return;
     renderCandidates(topCandidates);
 
+    // 변화 요약 (직전 스캔 / 24시간 전 대비)
+    setProgress(85, '변화 요약 계산 중...');
+    changeText = buildChangeSummary(regimeData, topCandidates);
+
     // Stage 4: AI Summary
     setProgress(87, 'Gemini AI 결론 생성 중...');
-    aiSummary = await generateAISummary(regimeData, macroCoins, topCandidates);
+    aiSummary = await generateAISummary(regimeData, macroCoins, topCandidates, changeText);
     if (stopFlag) return;
 
     // Stage 5: Telegram
     setProgress(96, '텔레그램 발송 중...');
-    await sendReport(regimeData, macroCoins, topCandidates, aiSummary);
+    await sendReport(regimeData, macroCoins, topCandidates, aiSummary, changeText);
 
     setProgress(100, '스캔 완료 ✅');
     document.getElementById('lastScanTime').textContent = new Date().toLocaleTimeString('ko');
@@ -1177,6 +1342,8 @@ function stopScan() { stopFlag = true; stopAutoScan(); }
    INIT
 ═══════════════════════════════════════════ */
 loadTgSettings();
+fetchFxRate();
+setInterval(fetchFxRate, 30 * 60 * 1000); // 30분마다 환율 갱신
 log('WHISTLER MASTER 시작');
 </script>
 </body>
