@@ -927,9 +927,10 @@ function detectCvdSurge(sym, t) {
 
 async function fetchOrderFlow(symbol) {
   try {
-    const [depth, premium] = await Promise.all([
+    const [depth, premium, ticker] = await Promise.all([
       fetchJSON(`${FAPI}/fapi/v1/depth?symbol=${symbol}&limit=${FLOW_CFG.DEPTH_LIMIT}`),
-      fetchJSON(`${FAPI}/fapi/v1/premiumIndex?symbol=${symbol}`).catch(()=>null)
+      fetchJSON(`${FAPI}/fapi/v1/premiumIndex?symbol=${symbol}`).catch(()=>null),
+      fetchJSON(`${FAPI}/fapi/v1/ticker/24hr?symbol=${symbol}`).catch(()=>null)
     ]);
     const bids = (depth?.bids || []).map(([p, q]) => ({ p: +p, q: +q }));
     const asks = (depth?.asks || []).map(([p, q]) => ({ p: +p, q: +q }));
@@ -949,7 +950,11 @@ async function fetchOrderFlow(symbol) {
     // 무기한 선물 펀딩비 — 양수면 롱이 숏에게 지불(롱 과열/선물 매수 우위), 음수면 그 반대
     const funding = (premium && premium.lastFundingRate != null) ? +premium.lastFundingRate : null;
 
-    return { imbalance, bidWall: !!bidWall, askWall: !!askWall, bidVol, askVol, funding };
+    // 현재가 + 24H 등락률 — 오더플로우 변화를 가격 움직임과 함께 보기 위함
+    const price = (ticker && ticker.lastPrice != null) ? +ticker.lastPrice : null;
+    const chg24h = (ticker && ticker.priceChangePercent != null) ? +ticker.priceChangePercent : null;
+
+    return { imbalance, bidWall: !!bidWall, askWall: !!askWall, bidVol, askVol, funding, price, chg24h };
   } catch (e) { return null; }
 }
 
@@ -1027,8 +1032,23 @@ function renderFlowCard(sym, color, flow, ctx, flashClass) {
     </div>`;
   }
 
+  // 시세 + 24H 등락률 — 오더플로우 변화를 가격 움직임과 함께 보기 위해 코인명 옆에 표기
+  let priceHtml = '';
+  if (flow.price != null) {
+    const chg = flow.chg24h;
+    const chgColor = chg == null ? 'var(--tx3)' : chg > 0 ? 'var(--green)' : chg < 0 ? 'var(--red)' : 'var(--tx2)';
+    const chgTxt = chg == null ? '' : ` <span style="color:${chgColor};font-weight:700">${chg>=0?'+':''}${chg.toFixed(2)}%</span>`;
+    priceHtml = `<div style="display:flex;align-items:baseline;gap:6px;margin-top:2px">
+      <span style="font-size:15px;font-weight:700">$${fmtP(flow.price)}</span>
+      ${chgTxt}
+      <span style="font-size:10px;color:var(--tx3);font-weight:400">· 24H 등락률</span>
+      ${fxRate ? `<span style="font-size:10px;color:var(--tx3)">(${krw(flow.price)})</span>` : ''}
+    </div>`;
+  }
+
   return `<div class="macro-card${flashAttr}" style="border-color:${color}33">
     <div class="mc-sym" style="color:${color}">${sym.replace('USDT','')}</div>
+    ${priceHtml}
     ${imbHtml}
     <div class="tf-badges" style="margin-top:8px">${badges.join('')}</div>
     <div style="margin-top:8px;font-size:11px">${fundingHtml}</div>
