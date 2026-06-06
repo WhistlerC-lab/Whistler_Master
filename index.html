@@ -1084,7 +1084,7 @@ async function startOrderFlowLive(topCandidates) {
   stopOrderFlowLive();
   flowPrevData = {}; // 대상이 바뀔 수 있으니 비교 기준 초기화 (첫 갱신은 깜빡임 없이 표시)
   flowImbHistory = {}; // 단기 속도 추적도 대상이 바뀌면 새로 시작
-  const extra = topCandidates.filter(r => r.lsc > 10 && r.sym !== 'BTCUSDT' && r.sym !== 'ETHUSDT').slice(0, 3);
+  const extra = topCandidates.filter(r => r.lsc > 10 && r.sym !== 'BTCUSDT' && r.sym !== 'ETHUSDT').slice(0, 5);
 
   // BTC/ETH는 후보 스캔 결과(t1h)에 포함되지 않으므로 CVD/체결 매수비중 표시를 위해 1H 추세를 별도 조회
   const [btcT, ethT] = await Promise.all([fetchShortTrend('BTCUSDT'), fetchShortTrend('ETHUSDT')]);
@@ -1121,7 +1121,7 @@ async function refreshOrderFlow() {
       return renderFlowCard(t.sym, t.color, flow, ctx, flash);
     });
     grid.innerHTML = cards.join('');
-    badge.innerHTML = `<span class="flow-live-dot"></span>실시간 · ${flowTargets.length}개 종목(BTC/ETH 고정, 현물 비교 포함) · ${new Date().toLocaleTimeString('ko')} 갱신 (${FLOW_REFRESH_MS/1000}초마다)`;
+    badge.innerHTML = `<span class="flow-live-dot"></span>${new Date().toLocaleTimeString('ko')} 갱신 (${FLOW_REFRESH_MS/1000}초마다)`;
   } catch (e) {
     grid.innerHTML = `<div class="empty"><div class="empty-icon">⚠</div><div>주문흐름 조회 실패</div></div>`;
   }
