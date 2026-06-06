@@ -43,6 +43,13 @@
   .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--tx3); flex-shrink: 0; }
   .dot.on { background: var(--green); box-shadow: 0 0 6px var(--green); animation: pulse 2s infinite; }
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+  @keyframes flowFlashUp   { 0%{background:rgba(34,197,94,.32);  box-shadow:0 0 0 1px rgba(34,197,94,.5)}  100%{background:transparent; box-shadow:none} }
+  @keyframes flowFlashDown { 0%{background:rgba(239,68,68,.32);  box-shadow:0 0 0 1px rgba(239,68,68,.5)}  100%{background:transparent; box-shadow:none} }
+  @keyframes flowFlashNeu  { 0%{background:rgba(167,139,250,.30); box-shadow:0 0 0 1px rgba(167,139,250,.5)} 100%{background:transparent; box-shadow:none} }
+  .flow-flash-up   { animation: flowFlashUp 1.4s ease-out; }
+  .flow-flash-down { animation: flowFlashDown 1.4s ease-out; }
+  .flow-flash-neu  { animation: flowFlashNeu 1.4s ease-out; }
+  .flow-live-dot { display:inline-block; width:6px; height:6px; border-radius:50%; background:var(--green); margin-right:5px; animation: pulse 1.6s infinite; vertical-align:middle; }
 
   /* ── PROGRESS ── */
   .progress-bar { height: 4px; background: var(--bd); border-radius: 2px; overflow: hidden; margin: 4px 0; }
@@ -260,6 +267,17 @@
       </div>
     </div>
 
+    <!-- Order flow snapshot (Alpha Hunter 요약) -->
+    <div>
+      <div class="section-hd">
+        <h2>📡 오더플로우 라이브</h2>
+        <div class="badge" id="flowBadge">—</div>
+      </div>
+      <div class="macro-grid" id="flowGrid">
+        <div class="empty"><div class="empty-icon">📡</div><div>스캔 후 BTC/ETH + 후보 코인의 주문흐름이 실시간으로 표시되고 자동 갱신됩니다 (변화 발생 시 카드가 깜빡입니다)</div></div>
+      </div>
+    </div>
+
     <!-- Change summary -->
     <div>
       <div class="section-hd">
@@ -277,6 +295,18 @@
         <h2>🤖 AI 종합 결론</h2>
       </div>
       <div class="ai-result loading" id="aiResult">스캔 완료 후 Gemini가 종합 결론을 생성합니다.</div>
+    </div>
+
+    <!-- Retrospective trend analysis -->
+    <div>
+      <div class="section-hd">
+        <h2>🔭 회고형 트렌드 분석</h2>
+        <div style="display:flex;align-items:center;gap:6px">
+          <span class="badge" id="retroBadge" style="font-size:10px">—</span>
+          <button class="btn" style="font-size:10px;padding:3px 8px" id="retroBtn" onclick="runRetrospective(true)">지금 분석</button>
+        </div>
+      </div>
+      <div class="ai-result loading" id="retroResult">누적 데이터가 쌓이면(최소 3시간 이상) 자동으로 시장 흐름을 회고 분석합니다. 직접 실행하려면 '지금 분석'을 눌러주세요.</div>
     </div>
 
     <!-- Last report -->
@@ -324,6 +354,23 @@
 
     <div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--bd)">
       <button class="btn" style="width:100%;font-size:11px" onclick="closeSettings()">닫기</button>
+    </div>
+  </div>
+</div>
+
+<!-- Coin Q&A Modal -->
+<div class="modal-overlay" id="qnaModal">
+  <div class="modal" style="width:480px">
+    <div class="modal-title">🤖 코인 Q&A <span id="qnaSymTitle" style="color:var(--purple)"></span> <span class="modal-close" onclick="closeCoinQna()">✕</span></div>
+    <div style="font-size:11px;color:var(--tx3);margin-bottom:8px" id="qnaContextSummary"></div>
+    <div id="qnaHistory" style="max-height:260px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;margin-bottom:10px"></div>
+    <div class="form-row">
+      <label>질문</label>
+      <textarea id="qnaInput" rows="2" placeholder="예: 이 코인 지금 진입해도 될까? RSI는 괜찮아 보여?" style="width:100%;background:var(--bg1);border:1px solid var(--bd);border-radius:6px;color:var(--tx1);padding:8px;font-size:12px;resize:vertical;font-family:inherit"></textarea>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:4px">
+      <button class="btn primary" style="flex:1" onclick="submitCoinQna()" id="qnaSubmitBtn">질문하기</button>
+      <button class="btn" style="flex:1" onclick="closeCoinQna()">닫기</button>
     </div>
   </div>
 </div>
@@ -400,6 +447,97 @@ function openSettings() {
   document.getElementById('settingsModal').classList.add('show');
 }
 function closeSettings() { document.getElementById('settingsModal').classList.remove('show'); }
+
+/* ═══════════════════════════════════════════
+   COIN Q&A MODE (개별 코인 AI 질의응답)
+═══════════════════════════════════════════ */
+let qnaCurSym = null;
+let qnaChat = []; // [{role:'user'|'ai', text}]
+
+function buildCoinQnaContext(r) {
+  if (!r) return null;
+  const posTxt = r.posBonus>=25 ? '🐳 매집+개미이탈(강한 다이버전스)' : r.pos?.netlong_up ? '🐳 큰손 매집중' : r.pos?.acct_down ? '👤 개미 이탈중' : '포지셔닝 중립';
+  const cvdTxt = r.t1h ? (r.t1h.cvdEmaCur > r.t1h.cvdEmaPrev ? 'CVD 상승(매수세 우위)' : 'CVD 하락(매도세 우위)') : '데이터 없음';
+  const lines = [
+    `심볼: ${r.sym.replace('USDT','')} (현재가 $${fmtP(r.price)}, 24h ${r.chg>=0?'+':''}${r.chg.toFixed(2)}%)`,
+    `종합 점수: ${r.finalScore}pt (롱 신호 ${r.lsc}pt)`,
+    `RSI(1D): ${r.t1d?.rsi?.toFixed(1)||'?'}`,
+    `타임프레임 정렬: ${r.tf1h?'1H✅':'1H❌'} ${r.tf4h?'4H✅':'4H❌'}`,
+    `포지셔닝 신호: ${posTxt}`,
+    `1H 체결 흐름: ${cvdTxt}, 매수 체결비중 ${r.t1h?.buyRatio!=null?Math.round(r.t1h.buyRatio*100)+'%':'?'}`,
+    r.tpsl ? `제안 TP/SL (10x 기준): TP1 $${fmtP(r.tpsl.tp1)}(+${pct(r.price,r.tpsl.tp1)}), SL $${fmtP(r.tpsl.sl)}(−${pct(r.price,r.tpsl.sl)}), RRR ${r.tpsl.rrr1}` : ''
+  ].filter(Boolean);
+  return lines.join('\n');
+}
+
+function openCoinQna(sym) {
+  const r = window.__qnaCands?.[sym];
+  if (!r) return;
+  qnaCurSym = sym;
+  qnaChat = [];
+  document.getElementById('qnaSymTitle').textContent = `— ${sym.replace('USDT','')}`;
+  document.getElementById('qnaContextSummary').textContent = `현재가 $${fmtP(r.price)} | 점수 ${r.finalScore}pt | RSI ${r.t1d?.rsi?.toFixed(1)||'?'} | ${r.tf1h?'1H✅':'1H❌'} ${r.tf4h?'4H✅':'4H❌'} — 위 데이터를 바탕으로 자유롭게 질문해보세요.`;
+  document.getElementById('qnaInput').value = '';
+  renderQnaHistory();
+  document.getElementById('qnaModal').classList.add('show');
+}
+function closeCoinQna() {
+  document.getElementById('qnaModal').classList.remove('show');
+  qnaCurSym = null;
+}
+function renderQnaHistory() {
+  const box = document.getElementById('qnaHistory');
+  if (!qnaChat.length) {
+    box.innerHTML = '<div style="font-size:11px;color:var(--tx3);padding:6px 0">아직 질문이 없습니다. 아래에 입력하고 질문해보세요.</div>';
+    return;
+  }
+  box.innerHTML = qnaChat.map(m => {
+    if (m.role === 'user') {
+      return `<div style="align-self:flex-end;max-width:85%;background:rgba(167,139,250,.15);border:1px solid rgba(167,139,250,.3);border-radius:8px;padding:8px 10px;font-size:12px;color:var(--tx1)">${m.text}</div>`;
+    }
+    return `<div style="align-self:flex-start;max-width:92%;background:var(--bg1);border:1px solid var(--bd);border-radius:8px;padding:8px 10px;font-size:12px;color:var(--tx2);white-space:pre-wrap;line-height:1.6">${m.text}</div>`;
+  }).join('');
+  box.scrollTop = box.scrollHeight;
+}
+async function submitCoinQna() {
+  const input = document.getElementById('qnaInput');
+  const q = input.value.trim();
+  if (!q || !qnaCurSym) return;
+  const r = window.__qnaCands?.[qnaCurSym];
+  if (!r) return;
+
+  if (!isValidKey(getApiKey())) {
+    qnaChat.push({ role:'ai', text:'⚠ Gemini API 키가 설정되지 않았습니다. ⚙️ 설정에서 키를 등록해주세요.' });
+    renderQnaHistory();
+    return;
+  }
+
+  qnaChat.push({ role:'user', text:q });
+  input.value = '';
+  renderQnaHistory();
+
+  const btn = document.getElementById('qnaSubmitBtn');
+  btn.disabled = true; btn.textContent = '응답 생성 중...';
+  qnaChat.push({ role:'ai', text:'🤖 분석 중...' });
+  renderQnaHistory();
+
+  const ctxText = buildCoinQnaContext(r);
+  const histLines = qnaChat.slice(0, -2).map(m => `${m.role==='user'?'사용자':'AI'}: ${m.text}`).join('\n');
+  const prompt = `당신은 가상화폐 스윙트레이딩 전문 애널리스트입니다. 아래는 특정 코인의 현재 스캔 데이터입니다. 이 데이터를 근거로 사용자의 질문에 한국어로 직관적이고 간결하게 답변해주세요. 데이터에 없는 내용은 추측하지 말고 "데이터에 없음"이라고 답하세요.
+
+## 코인 데이터 (${qnaCurSym.replace('USDT','')})
+${ctxText}
+
+${histLines ? `## 이전 대화\n${histLines}\n` : ''}
+## 사용자 질문
+${q}`;
+
+  const result = await callGemini(prompt);
+  qnaChat.pop(); // "분석 중..." 제거
+  qnaChat.push({ role:'ai', text: result || '응답 생성 실패' });
+  renderQnaHistory();
+  btn.disabled = false; btn.textContent = '질문하기';
+}
 function saveTgSettings() {
   localStorage.setItem('wm_tg_token', document.getElementById('tgToken').value.trim());
   localStorage.setItem('wm_tg_chat',  document.getElementById('tgChat').value.trim());
@@ -702,6 +840,259 @@ async function fetchPositioning(symbol, period='4h') {
 }
 
 /* ═══════════════════════════════════════════
+   ORDER FLOW LIVE PANEL (Alpha Hunter V2.3 핵심 아이디어 요약 — 오더북 벽/CVD/체결 우위)
+   ※ 스캔 주기와 별개로 짧은 주기로 자동 갱신되는 실시간 패널.
+      이전 값과 비교해 변화가 생기면 카드가 색상별로 깜빡이는 효과를 줌
+═══════════════════════════════════════════ */
+const FLOW_CFG = { DEPTH_LIMIT: 20, WALL_MULT: 5 };
+const FLOW_REFRESH_MS = 12 * 1000; // 12초마다 실시간 갱신
+const SAPI = 'https://api.binance.com'; // 현물(spot) 시장 API — BTC/ETH 현물-선물 비교 전용
+let flowTimer = null;
+let flowTargets = [];
+let flowPrevData = {}; // sym -> { imbalance, bidWall, askWall } (직전 값, 변화 감지용)
+
+// ── "속도(velocity)" 개념: 단순 방향(상승/하락)을 넘어 "갑자기 확 변하는" 움직임을 감지 ──
+// 1) 오더북 임밸런스: 12초마다 갱신되는 실제 실시간 데이터 → 최근 N회 추이를 누적해 "단기 급변" 감지
+// 2) CVD/체결 매수비중: 스캔 주기(약 15~30분)마다 갱신 → "직전 스캔 대비 급증/급감" 감지
+const FLOW_IMB_HISTORY_LEN = 5;     // 최근 5회(=약 1분) 임밸런스 추이를 비교
+const FLOW_IMB_SURGE_DELTA = 0.18;  // 1분 새 임밸런스가 ±18%p 이상 움직이면 "급변"으로 간주
+const FLOW_CVD_SURGE_DELTA = 0.12;  // 직전 스캔 대비 체결 매수비중이 ±12%p 이상 움직이면 "급증/급감"
+let flowImbHistory = {};  // sym -> [imbalance, ...] 최근 값 누적 (단기 속도 감지용)
+let flowScanPrev = {};    // sym -> { buyRatio, cvdSlope } 직전 스캔 값 (스캔 간 속도 감지용)
+let flowCvdSurge = {};    // sym -> {dir:'up'|'down', dRatio} | null  (스캔 시점에 1회 계산해 캐싱)
+
+// BTC/ETH는 후보 목록에 없을 수 있어 별도로 1H 추세(CVD/체결 매수비중 포함)를 조회
+async function fetchShortTrend(symbol) {
+  try {
+    const k1h = await fetchJSON(`${FAPI}/fapi/v1/klines?symbol=${symbol}&interval=1h&limit=220`);
+    return evaluateTrend(parseK(k1h));
+  } catch (e) { return null; }
+}
+
+// 현물(spot) 오더북 — BTC/ETH 전용. 선물 임밸런스와 비교해 "현물-선물 괴리"를 판단하는 용도
+async function fetchSpotOrderFlow(symbol) {
+  try {
+    const depth = await fetchJSON(`${SAPI}/api/v3/depth?symbol=${symbol}&limit=${FLOW_CFG.DEPTH_LIMIT}`);
+    const bids = (depth?.bids || []).map(([p, q]) => ({ p: +p, q: +q }));
+    const asks = (depth?.asks || []).map(([p, q]) => ({ p: +p, q: +q }));
+    if (!bids.length || !asks.length) return null;
+    const bidVol = bids.reduce((s, x) => s + x.q, 0);
+    const askVol = asks.reduce((s, x) => s + x.q, 0);
+    const total = bidVol + askVol;
+    const imbalance = total ? (bidVol - askVol) / total : 0;
+    return { imbalance };
+  } catch (e) { return null; }
+}
+
+// 오더북 임밸런스의 "단기 속도" — 최근 1분(5회) 동안의 누적 변화량이 임계치를 넘으면 "급변"으로 표시
+function trackImbalanceVelocity(sym, imbalance) {
+  if (imbalance == null) return null;
+  const hist = flowImbHistory[sym] || [];
+  hist.push(imbalance);
+  while (hist.length > FLOW_IMB_HISTORY_LEN) hist.shift();
+  flowImbHistory[sym] = hist;
+  if (hist.length < FLOW_IMB_HISTORY_LEN) return null; // 표본이 쌓이기 전엔 판단 보류
+  const delta = hist[hist.length - 1] - hist[0];
+  if (Math.abs(delta) >= FLOW_IMB_SURGE_DELTA) return { dir: delta > 0 ? 'up' : 'down', delta };
+  return null;
+}
+
+// CVD/체결 매수비중의 "스캔 간 속도" — 직전 스캔 대비 매수비중이 큰 폭으로 튀고, 방향도 같으면 "급증/급감"
+function detectCvdSurge(sym, t) {
+  if (!t || t.buyRatio == null) { flowScanPrev[sym] = null; return null; }
+  const cur = { buyRatio: t.buyRatio, cvdSlope: t.cvdEmaCur - t.cvdEmaPrev };
+  const prev = flowScanPrev[sym];
+  flowScanPrev[sym] = cur;
+  if (!prev) return null; // 첫 스캔은 비교 기준이 없어 판단 보류
+  const dRatio = cur.buyRatio - prev.buyRatio;
+  if (dRatio >= FLOW_CVD_SURGE_DELTA && cur.cvdSlope > 0) return { dir: 'up', dRatio };
+  if (dRatio <= -FLOW_CVD_SURGE_DELTA && cur.cvdSlope < 0) return { dir: 'down', dRatio };
+  return null;
+}
+
+async function fetchOrderFlow(symbol) {
+  try {
+    const [depth, premium] = await Promise.all([
+      fetchJSON(`${FAPI}/fapi/v1/depth?symbol=${symbol}&limit=${FLOW_CFG.DEPTH_LIMIT}`),
+      fetchJSON(`${FAPI}/fapi/v1/premiumIndex?symbol=${symbol}`).catch(()=>null)
+    ]);
+    const bids = (depth?.bids || []).map(([p, q]) => ({ p: +p, q: +q }));
+    const asks = (depth?.asks || []).map(([p, q]) => ({ p: +p, q: +q }));
+    if (!bids.length || !asks.length) return null;
+
+    const bidVol = bids.reduce((s, x) => s + x.q, 0);
+    const askVol = asks.reduce((s, x) => s + x.q, 0);
+    const total = bidVol + askVol;
+    const imbalance = total ? (bidVol - askVol) / total : 0; // -1(매도우위) ~ +1(매수우위)
+
+    const avgBid = bidVol / bids.length;
+    const avgAsk = askVol / asks.length;
+    // "벽": 평균 대비 WALL_MULT배 이상의 단일 호가 물량 — 고래 매수/매도 벽 추정
+    const bidWall = bids.find(x => x.q > avgBid * FLOW_CFG.WALL_MULT && x.q > avgAsk * 2);
+    const askWall = asks.find(x => x.q > avgAsk * FLOW_CFG.WALL_MULT && x.q > avgBid * 2);
+
+    // 무기한 선물 펀딩비 — 양수면 롱이 숏에게 지불(롱 과열/선물 매수 우위), 음수면 그 반대
+    const funding = (premium && premium.lastFundingRate != null) ? +premium.lastFundingRate : null;
+
+    return { imbalance, bidWall: !!bidWall, askWall: !!askWall, bidVol, askVol, funding };
+  } catch (e) { return null; }
+}
+
+function renderFlowCard(sym, color, flow, ctx, flashClass) {
+  const { cvdDir = null, buyRatio = null, imbVelocity = null, cvdSurge = null, spot = null } = ctx || {};
+  const flashAttr = flashClass ? ` ${flashClass}` : '';
+  if (!flow) {
+    return `<div class="macro-card${flashAttr}" style="border-color:${color}33">
+      <div class="mc-sym" style="color:${color}">${sym.replace('USDT','')}</div>
+      <div style="font-size:11px;color:var(--tx3);margin-top:6px">주문흐름 데이터 조회 실패</div>
+    </div>`;
+  }
+  const imbPct = Math.round(flow.imbalance * 100);
+  const imbColor = imbPct > 10 ? 'var(--green)' : imbPct < -10 ? 'var(--red)' : 'var(--tx2)';
+  const imbLabel = imbPct > 10 ? '🟢 매수 우위' : imbPct < -10 ? '🔴 매도 우위' : '⚪ 균형';
+
+  // "속도" 표현 1: 오더북 임밸런스가 최근 1분 새 큰 폭으로 쏠리면 평소 라벨 대신 "급변" 라벨로 강조
+  let imbHtml;
+  if (imbVelocity) {
+    const up = imbVelocity.dir === 'up';
+    const dPct = Math.round(imbVelocity.delta * 100);
+    imbHtml = `<div style="font-size:13px;font-weight:800;color:${up?'var(--green)':'var(--red)'};margin-top:4px">
+      ${up ? '🚀 매수 쏠림 급가속' : '🔻 매도 쏠림 급가속'} <span style="font-size:10px;font-weight:400;color:var(--tx3)">· 최근 1분간 임밸런스 ${dPct>=0?'+':''}${dPct}%p 급변 (현재 ${imbPct>=0?'+':''}${imbPct}%)</span>
+    </div>`;
+  } else {
+    imbHtml = `<div style="font-size:13px;font-weight:700;color:${imbColor};margin-top:4px">${imbLabel} (${imbPct>=0?'+':''}${imbPct}%) <span style="font-size:10px;color:var(--tx3);font-weight:400">· 오더북 매수/매도 호가 비율</span></div>`;
+  }
+
+  // "속도" 표현 2: CVD/체결 매수비중이 직전 스캔 대비 급격히 늘거나 줄면 단순 상승↑/하락↓이 아닌 "급증/급감"으로 표현
+  let cvdLabel;
+  if (cvdSurge) {
+    const up = cvdSurge.dir === 'up';
+    const dPct = Math.round(cvdSurge.dRatio * 100);
+    cvdLabel = `<span style="font-weight:800;color:${up?'var(--green)':'var(--red)'}">${up ? '🚀 CVD·매수세 급증' : '🔻 CVD·매도세 급증'}</span>
+      <span style="font-size:10px;color:var(--tx3)"> (직전 스캔 대비 매수비중 ${dPct>=0?'+':''}${dPct}%p)</span>`;
+  } else if (cvdDir === true) {
+    cvdLabel = '<span style="color:var(--green)">CVD 상승↑</span>';
+  } else if (cvdDir === false) {
+    cvdLabel = '<span style="color:var(--red)">CVD 하락↓</span>';
+  } else {
+    cvdLabel = '<span style="color:var(--tx3)">CVD —</span>';
+  }
+
+  const badges = [];
+  if (flow.bidWall) badges.push('<span class="tf-badge" style="background:rgba(34,197,94,.15);color:var(--green);border:1px solid rgba(34,197,94,.3)">🧱 매수벽</span>');
+  if (flow.askWall) badges.push('<span class="tf-badge" style="background:rgba(239,68,68,.15);color:var(--red);border:1px solid rgba(239,68,68,.3)">🧱 매도벽</span>');
+  if (!badges.length) badges.push('<span class="tf-badge" style="color:var(--tx3)">벽 감지 없음</span>');
+
+  // 펀딩비: 무기한 선물에서 롱/숏 포지션이 어느 쪽으로 쏠려있는지 보여주는 직접적인 "선물 매수/매도" 신호
+  // 양수(+) = 롱이 숏에게 비용 지불 → 롱 포지션 과열(선물 매수 우위) / 음수(−) = 그 반대
+  let fundingHtml = '<span style="color:var(--tx3)">펀딩비 —</span>';
+  if (flow.funding != null) {
+    const fp = (flow.funding * 100);
+    const fColor = fp > 0.01 ? 'var(--green)' : fp < -0.01 ? 'var(--red)' : 'var(--tx2)';
+    const fLabel = fp > 0.01 ? '🟢 선물 롱 우위' : fp < -0.01 ? '🔴 선물 숏 우위' : '⚪ 중립';
+    fundingHtml = `<span style="color:${fColor}">${fLabel} (펀딩비 ${fp>=0?'+':''}${fp.toFixed(4)}%)</span>`;
+  }
+
+  // 현물(spot) 비교 — BTC/ETH 전용. 현물과 선물의 매수/매도 쏠림 방향이 어긋나면 "괴리" 알림
+  let spotHtml = '';
+  if (spot) {
+    const sPct = Math.round(spot.imbalance * 100);
+    const sColor = sPct > 10 ? 'var(--green)' : sPct < -10 ? 'var(--red)' : 'var(--tx2)';
+    const sLabel = sPct > 10 ? '🟢 현물 매수 우위' : sPct < -10 ? '🔴 현물 매도 우위' : '⚪ 현물 균형';
+    let divergenceHtml = '';
+    // 현물과 선물이 서로 반대 방향으로 뚜렷하게(±10%p 이상) 쏠려 있으면 "괴리"로 표시
+    const sDir = sPct > 10 ? 1 : sPct < -10 ? -1 : 0;
+    const fDir = imbPct > 10 ? 1 : imbPct < -10 ? -1 : 0;
+    if (sDir !== 0 && fDir !== 0 && sDir !== fDir) {
+      divergenceHtml = `<div style="margin-top:5px;font-size:11px;color:#fbbf24">⚠️ 현물-선물 괴리 감지 — 현물은 ${sDir>0?'매수':'매도'} 우위인데 선물은 ${fDir>0?'매수':'매도'} 우위 (방향 엇갈림, 숏스퀴즈/롱청산 가능성 주시)</div>`;
+    }
+    spotHtml = `<div style="margin-top:6px;padding-top:6px;border-top:1px dashed var(--bd)">
+      <div style="font-size:11px;color:${sColor}">${sLabel} (${sPct>=0?'+':''}${sPct}%) <span style="font-size:10px;color:var(--tx3)">· 현물(spot) 오더북</span></div>
+      ${divergenceHtml}
+    </div>`;
+  }
+
+  return `<div class="macro-card${flashAttr}" style="border-color:${color}33">
+    <div class="mc-sym" style="color:${color}">${sym.replace('USDT','')}</div>
+    ${imbHtml}
+    <div class="tf-badges" style="margin-top:8px">${badges.join('')}</div>
+    <div style="margin-top:8px;font-size:11px">${fundingHtml}</div>
+    <div style="margin-top:6px;font-size:11px;color:var(--tx2);display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px">
+      <span>${cvdLabel}</span>
+      <span>체결 매수비중 ${buyRatio!=null ? Math.round(buyRatio*100)+'%' : '—'}</span>
+    </div>
+    ${spotHtml}
+  </div>`;
+}
+
+// 직전 값과 비교해 어떤 색의 깜빡임을 줄지 결정
+// - 매수/매도 임밸런스가 의미있게(±3%p 이상) 변하면 방향에 따라 초록/빨강
+// - 임밸런스 변화는 미미하지만 매집/매도벽이 새로 생기거나 사라지면 보라색(중립 알림)
+function diffFlowFlash(sym, flow) {
+  if (!flow) return '';
+  const prev = flowPrevData[sym];
+  flowPrevData[sym] = { imbalance: flow.imbalance, bidWall: flow.bidWall, askWall: flow.askWall };
+  if (!prev) return ''; // 최초 로드 시에는 깜빡이지 않음
+
+  const dImb = flow.imbalance - prev.imbalance;
+  if (Math.abs(dImb) >= 0.03) return dImb > 0 ? 'flow-flash-up' : 'flow-flash-down';
+  if (flow.bidWall !== prev.bidWall || flow.askWall !== prev.askWall) return 'flow-flash-neu';
+  return '';
+}
+
+function stopOrderFlowLive() {
+  if (flowTimer) { clearInterval(flowTimer); flowTimer = null; }
+}
+
+// 스캔이 끝날 때마다 호출 — 대상 목록(BTC/ETH 고정 + 후보)을 갱신하고 라이브 폴링을 (재)시작
+async function startOrderFlowLive(topCandidates) {
+  stopOrderFlowLive();
+  flowPrevData = {}; // 대상이 바뀔 수 있으니 비교 기준 초기화 (첫 갱신은 깜빡임 없이 표시)
+  flowImbHistory = {}; // 단기 속도 추적도 대상이 바뀌면 새로 시작
+  const extra = topCandidates.filter(r => r.lsc > 10 && r.sym !== 'BTCUSDT' && r.sym !== 'ETHUSDT').slice(0, 3);
+
+  // BTC/ETH는 후보 스캔 결과(t1h)에 포함되지 않으므로 CVD/체결 매수비중 표시를 위해 1H 추세를 별도 조회
+  const [btcT, ethT] = await Promise.all([fetchShortTrend('BTCUSDT'), fetchShortTrend('ETHUSDT')]);
+
+  flowTargets = [
+    { sym: 'BTCUSDT', color: '#f7931a', t: btcT },
+    { sym: 'ETHUSDT', color: '#627eea', t: ethT },
+    ...extra.map(r => ({ sym: r.sym, color: '#a78bfa', t: r.t1h || r.t4h }))
+  ];
+  // 스캔 시점 1회: 직전 스캔과 비교해 CVD/매수비중이 "급증/급감"했는지 판정해 캐싱(라이브 갱신마다 재계산하지 않음)
+  flowTargets.forEach(tg => { flowCvdSurge[tg.sym] = detectCvdSurge(tg.sym, tg.t); });
+
+  refreshOrderFlow();
+  flowTimer = setInterval(refreshOrderFlow, FLOW_REFRESH_MS);
+}
+
+async function refreshOrderFlow() {
+  if (!flowTargets.length) return;
+  const grid = document.getElementById('flowGrid');
+  const badge = document.getElementById('flowBadge');
+  try {
+    const isSpotTarget = s => s === 'BTCUSDT' || s === 'ETHUSDT';
+    const [flows, spotFlows] = await Promise.all([
+      Promise.all(flowTargets.map(t => fetchOrderFlow(t.sym))),
+      Promise.all(flowTargets.map(t => isSpotTarget(t.sym) ? fetchSpotOrderFlow(t.sym) : Promise.resolve(null)))
+    ]);
+    const cards = flowTargets.map((t, i) => {
+      const flow = flows[i];
+      const cvdDir = t.t ? (t.t.cvdEmaCur > t.t.cvdEmaPrev) : null;
+      const buyRatio = t.t ? t.t.buyRatio : null;
+      const flash = diffFlowFlash(t.sym, flow);
+      const imbVelocity = flow ? trackImbalanceVelocity(t.sym, flow.imbalance) : null;
+      const ctx = { cvdDir, buyRatio, imbVelocity, cvdSurge: flowCvdSurge[t.sym] || null, spot: spotFlows[i] };
+      return renderFlowCard(t.sym, t.color, flow, ctx, flash);
+    });
+    grid.innerHTML = cards.join('');
+    badge.innerHTML = `<span class="flow-live-dot"></span>실시간 · ${flowTargets.length}개 종목(BTC/ETH 고정, 현물 비교 포함) · ${new Date().toLocaleTimeString('ko')} 갱신 (${FLOW_REFRESH_MS/1000}초마다)`;
+  } catch (e) {
+    grid.innerHTML = `<div class="empty"><div class="empty-icon">⚠</div><div>주문흐름 조회 실패</div></div>`;
+  }
+}
+
+/* ═══════════════════════════════════════════
    STAGE 1 TF SCORING  (Terminal v1.8 logic)
 ═══════════════════════════════════════════ */
 const TF_SCORE = { '1h':2, '4h':4 };
@@ -897,6 +1288,9 @@ function renderCandidates(results) {
   }
   const MAX_SCORE = top10[0]?.finalScore || 100;
   const icons = ['👑','👑','🔥','🔥','🔔','🔔','🔔','👀','👀','👀'];
+  // Q&A 모달에서 컨텍스트로 사용할 후보 데이터 보관 (심볼별)
+  window.__qnaCands = {};
+  top10.forEach(r => { window.__qnaCands[r.sym] = r; });
   const rows = top10.map((r, idx) => {
     const tpsl = r.tpsl;
     return `<tr>
@@ -930,10 +1324,13 @@ function renderCandidates(results) {
                 <span class="tpsl-sl">SL  $${fmtP(tpsl.sl)} (−${pct(r.price,tpsl.sl)})</span>`:
                 `<span style="color:var(--tx3)">$${fmtP(r.price)}</span>`}
       </td>
+      <td>
+        <button class="btn" style="font-size:10px;padding:4px 8px" onclick="openCoinQna('${r.sym}')">🤖 질문</button>
+      </td>
     </tr>`;
   });
   document.getElementById('candTable').innerHTML = `<table class="cand-table">
-    <thead><tr><th>#</th><th>심볼</th><th>현재가</th><th>점수</th><th>TF정렬</th><th>TP / SL</th></tr></thead>
+    <thead><tr><th>#</th><th>심볼</th><th>현재가</th><th>점수</th><th>TF정렬</th><th>TP / SL</th><th>Q&A</th></tr></thead>
     <tbody>${rows.join('')}</tbody>
   </table>`;
 }
@@ -1094,6 +1491,109 @@ ${changeText || '비교 데이터 없음 (누적 중)'}
   const result = await callGemini(prompt);
   el.className = 'ai-result';
   el.textContent = result || '분석 실패';
+  return result || '';
+}
+
+/* ═══════════════════════════════════════════
+   RETROSPECTIVE TREND ANALYSIS (회고형 트렌드 분석)
+   누적된 wm_scan_history(최대 26시간)를 바탕으로 시장 흐름을
+   주기적으로(또는 수동으로) Gemini가 회고 분석
+═══════════════════════════════════════════ */
+const RETRO_KEY = 'wm_retro_last';
+const RETRO_MIN_SPAN = 3 * 60 * 60 * 1000;   // 최소 3시간 누적 필요
+const RETRO_INTERVAL = 4 * 60 * 60 * 1000;   // 자동 실행 주기: 4시간마다
+
+function buildRetrospectiveContext(hist) {
+  if (!hist.length) return null;
+  const span = hist[hist.length-1].ts - hist[0].ts;
+  if (span < RETRO_MIN_SPAN) return null;
+
+  // 1) 레짐 점수 추이 (시간순 샘플링 — 최대 8개 포인트)
+  const step = Math.max(1, Math.floor(hist.length / 8));
+  const regimeLine = hist.filter((_,i)=>i%step===0).map(s =>
+    `${fmtAgo(s.ts)} 레짐:${s.regimeScore ?? '?'}`
+  ).join(' → ');
+
+  // 2) 후보 등장 빈도 — 자주 등장한 코인 = 지속적 강세 후보
+  const freq = {};
+  hist.forEach(s => (s.candidates||[]).forEach(c => { freq[c.sym] = (freq[c.sym]||0) + 1; }));
+  const ranked = Object.entries(freq).sort((a,b)=>b[1]-a[1]).slice(0,8);
+  const freqLine = ranked.map(([sym,n]) => `${sym.replace('USDT','')}(${n}회)`).join(', ');
+
+  // 3) 최근 등장 vs 누적 초반 등장 비교 — 새로 떠오른 코인 / 사라진 코인
+  const half = Math.floor(hist.length/2);
+  const earlySyms = new Set(); hist.slice(0,half).forEach(s => (s.candidates||[]).forEach(c=>earlySyms.add(c.sym)));
+  const lateSyms  = new Set(); hist.slice(half).forEach(s => (s.candidates||[]).forEach(c=>lateSyms.add(c.sym)));
+  const rising = [...lateSyms].filter(s=>!earlySyms.has(s)).map(s=>s.replace('USDT',''));
+  const fading = [...earlySyms].filter(s=>!lateSyms.has(s)).map(s=>s.replace('USDT',''));
+
+  const first = hist[0], last = hist[hist.length-1];
+  return {
+    spanLabel: `${fmtAgo(first.ts)} ~ 현재 (총 ${hist.length}회 스캔, 약 ${(span/3600000).toFixed(1)}시간 누적)`,
+    regimeLine,
+    regimeDelta: (last.regimeScore ?? 0) - (first.regimeScore ?? 0),
+    freqLine: freqLine || '없음',
+    rising: rising.length ? rising.join(', ') : '없음',
+    fading: fading.length ? fading.join(', ') : '없음'
+  };
+}
+
+async function runRetrospective(manual=false) {
+  const el = document.getElementById('retroResult');
+  const badge = document.getElementById('retroBadge');
+  const hist = loadScanHistory();
+  const ctx = buildRetrospectiveContext(hist);
+
+  if (!ctx) {
+    if (manual) {
+      el.className = 'ai-result';
+      el.textContent = `아직 누적 데이터가 부족합니다 (최소 ${RETRO_MIN_SPAN/3600000}시간 필요, 현재 ${hist.length ? ((hist[hist.length-1].ts-hist[0].ts)/3600000).toFixed(1) : 0}시간 누적).`;
+    }
+    return;
+  }
+
+  // 자동 실행은 RETRO_INTERVAL마다 1회만 — 수동 실행은 항상 허용
+  const lastRun = +localStorage.getItem(RETRO_KEY) || 0;
+  if (!manual && Date.now() - lastRun < RETRO_INTERVAL) return;
+  if (!isValidKey(getApiKey())) {
+    if (manual) { el.className='ai-result'; el.textContent = '⚠ Gemini API 키가 설정되지 않았습니다. ⚙️ 설정에서 키를 등록해주세요.'; }
+    return;
+  }
+
+  el.className = 'ai-result loading';
+  el.textContent = '🔭 누적 데이터를 바탕으로 회고 분석 생성 중...';
+  badge.textContent = '분석 중…';
+
+  const prompt = `당신은 가상화폐 스윙트레이딩 전문 애널리스트입니다. 아래는 최근 누적된 스캔 기록을 요약한 데이터입니다. 단발성 스냅샷이 아니라 "시간 흐름에 따른 추세"에 집중해서 회고 분석을 작성해주세요.
+
+## 누적 기간
+${ctx.spanLabel}
+
+## 레짐 점수 추이
+${ctx.regimeLine}
+(시작 대비 변화: ${ctx.regimeDelta>=0?'+':''}${ctx.regimeDelta}pt)
+
+## 누적 기간 동안 가장 자주 등장한 롱 후보
+${ctx.freqLine}
+
+## 새로 부상한 코인 (후반부에만 등장)
+${ctx.rising}
+
+## 약화된 코인 (초반에만 등장, 최근엔 사라짐)
+${ctx.fading}
+
+## 요청
+다음을 한국어로 간결하게 작성해주세요 (각 2~3문장):
+1. 📈 누적 기간 동안의 시장 흐름 변화 (레짐이 개선/악화/횡보 중 어디로 가고 있는지)
+2. 🔁 지속적으로 강세를 보인 코인과 그 의미
+3. 🆕 새로 부상/약화된 코인에서 읽을 수 있는 시장 로테이션 신호
+4. 🧭 이 추세가 이어진다면 다음 몇 시간 동안 어떤 전략이 유효할지`;
+
+  const result = await callGemini(prompt);
+  el.className = 'ai-result';
+  el.textContent = result || '분석 실패';
+  badge.textContent = fmtAgo(Date.now()).replace('전','업데이트');
+  localStorage.setItem(RETRO_KEY, String(Date.now()));
   return result || '';
 }
 
@@ -1306,10 +1806,17 @@ async function runScan() {
     setProgress(85, '변화 요약 계산 중...');
     changeText = buildChangeSummary(regimeData, topCandidates);
 
+    // 오더플로우 라이브 패널 (BTC/ETH 고정 + 후보 상위 코인) — 스캔 주기와 별개로 실시간 자동 갱신
+    setProgress(86, '오더플로우 실시간 패널 갱신 중...');
+    startOrderFlowLive(topCandidates); // 비동기 — 메인 플로우를 막지 않음, 이후 자체 주기로 계속 갱신
+
     // Stage 4: AI Summary
     setProgress(87, 'Gemini AI 결론 생성 중...');
     aiSummary = await generateAISummary(regimeData, macroCoins, topCandidates, changeText);
     if (stopFlag) return;
+
+    // 회고형 트렌드 분석 (누적 3시간↑ & 마지막 실행 후 4시간↑ 경과 시 자동 1회)
+    runRetrospective(false);
 
     // Stage 5: Telegram
     setProgress(96, '텔레그램 발송 중...');
