@@ -93,20 +93,22 @@
   .mc-stat-val { font-size: 12px; font-weight: 600; margin-top: 2px; }
 
   /* ── CANDIDATE TABLE ── */
-  .cand-table { width: 100%; border-collapse: collapse; }
-  .cand-table th { font-size: 10px; color: var(--tx3); font-weight: 600; padding: 6px 8px; border-bottom: 1px solid var(--bd); text-align: left; letter-spacing: .06em; }
+  /* 좁은 화면에서 칸이 짓눌리지 않도록 가로 스크롤 컨테이너로 감싸고, 표 자체는 최소 너비를 보장 */
+  .cand-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .cand-table { width: 100%; min-width: 640px; border-collapse: collapse; }
+  .cand-table th { font-size: 10px; color: var(--tx3); font-weight: 600; padding: 6px 8px; border-bottom: 1px solid var(--bd); text-align: left; letter-spacing: .06em; white-space: nowrap; }
   .cand-table td { padding: 8px 8px; border-bottom: 1px solid rgba(42,48,80,.5); font-size: 12px; vertical-align: middle; }
   .cand-table tr:last-child td { border-bottom: none; }
   .cand-table tr:hover td { background: rgba(255,255,255,.02); }
-  .sym-name { font-weight: 700; color: var(--tx1); }
+  .sym-name { font-weight: 700; color: var(--tx1); white-space: nowrap; }
   .score-bar-wrap { display: flex; align-items: center; gap: 6px; }
   .score-bar { height: 6px; border-radius: 3px; background: linear-gradient(90deg, var(--blue), var(--green)); }
   .score-num { font-size: 12px; font-weight: 700; min-width: 28px; }
   .tf-badges { display: flex; gap: 3px; flex-wrap: wrap; }
-  .tf-badge { font-size: 9px; padding: 1px 5px; border-radius: 3px; font-weight: 700; }
+  .tf-badge { font-size: 9px; padding: 1px 5px; border-radius: 3px; font-weight: 700; white-space: nowrap; }
   .tf-ok { background: rgba(74,222,128,.15); color: var(--green); border: 1px solid rgba(74,222,128,.3); }
   .tf-half { background: rgba(251,191,36,.1); color: var(--gold); border: 1px solid rgba(251,191,36,.25); }
-  .tpsl-cell { font-size: 10px; line-height: 1.6; color: var(--tx2); }
+  .tpsl-cell { font-size: 10px; line-height: 1.6; color: var(--tx2); white-space: nowrap; }
   .tpsl-tp { color: var(--green); }
   .tpsl-sl { color: var(--red); }
   .rank-icon { font-size: 14px; min-width: 20px; }
@@ -142,6 +144,19 @@
     .main { grid-template-columns: 1fr; }
     .macro-grid { grid-template-columns: 1fr; }
     .sidebar { border-right: none; border-bottom: 1px solid var(--bd); }
+
+    /* 헤더: 한 줄에 다 들어가지 않으니 줄바꿈을 허용하고, 버튼 영역은 새 줄에서 왼쪽 정렬 */
+    .header { flex-wrap: wrap; padding: 10px 12px; gap: 8px 10px; row-gap: 8px; }
+    .logo { font-size: 13px; }
+    .header-right { margin-left: 0; width: 100%; justify-content: flex-start; flex-wrap: wrap; gap: 8px; }
+    .btn { padding: 6px 10px; font-size: 11px; }
+    #hFxRate { margin-left: 0 !important; }
+  }
+
+  @media (max-width: 480px) {
+    body { font-size: 12px; }
+    .header { padding: 8px 10px; }
+    .logo span { display: block; font-size: 10px; }
   }
 </style>
 </head>
@@ -1329,10 +1344,11 @@ function renderCandidates(results) {
       </td>
     </tr>`;
   });
-  document.getElementById('candTable').innerHTML = `<table class="cand-table">
+  // 가로 스크롤 컨테이너로 감싸 좁은 화면에서도 표가 짓눌리지 않고 옆으로 스크롤되도록 함
+  document.getElementById('candTable').innerHTML = `<div class="cand-table-wrap"><table class="cand-table">
     <thead><tr><th>#</th><th>심볼</th><th>현재가</th><th>점수</th><th>TF정렬</th><th>TP / SL</th><th>Q&A</th></tr></thead>
     <tbody>${rows.join('')}</tbody>
-  </table>`;
+  </table></div>`;
 }
 
 /* ═══════════════════════════════════════════
