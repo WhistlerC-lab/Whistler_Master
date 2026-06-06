@@ -267,7 +267,7 @@
         <div class="badge" id="changeBadge">—</div>
       </div>
       <div style="background:var(--bg2);border:1px solid var(--bd);border-radius:8px;padding:14px" id="changeBox">
-        <div class="empty" style="padding:14px"><div class="empty-icon">📭</div><div>2회 이상 스캔 후 비교가 표시됩니다</div></div>
+        <div class="empty" style="padding:14px"><div class="empty-icon">📭</div><div>최소 20분 이상 누적되면 비교가 표시됩니다</div></div>
       </div>
     </div>
 
@@ -1004,19 +1004,29 @@ function renderChangeBlock(label, d) {
 function buildChangeSummary(regimeData, topCandidates) {
   const hist = saveScanSnapshot(regimeData, topCandidates);
   const curr = hist[hist.length-1];
-  const prevScan = hist.length >= 2 ? hist[hist.length-2] : null;
-  const prev24h = hist.length >= 2 ? findClosestSnapshot(hist.slice(0,-1), curr.ts - 24*60*60*1000, 3*60*60*1000) : null;
+  const others = hist.slice(0, -1);
 
-  const dScan = diffSnapshots(curr, prevScan);
-  const d24h  = (prev24h && prev24h.ts !== prevScan?.ts) ? diffSnapshots(curr, prev24h) : null;
+  // 단기 비교: "직전 스캔"이 아니라 최소 1시간 이상 누적된 시점과 비교 (스캔 주기가 15~30분이면
+  // 직전 스캔과의 차이는 노이즈 수준이라 의미 있는 추세 변화를 보려면 더 긴 텀이 필요)
+  const SHORT_TARGET = 60 * 60 * 1000; // 1시간
+  let shortRef = findClosestSnapshot(others, curr.ts - SHORT_TARGET, 25 * 60 * 1000);
+  if (!shortRef && others.length) {
+    // 아직 1시간치가 안 쌓였으면, 누적된 것 중 가장 오래된 스냅샷을 잠정 비교 대상으로 사용
+    const oldest = others[0];
+    if (curr.ts - oldest.ts >= 20 * 60 * 1000) shortRef = oldest;
+  }
+  const prev24h = others.length ? findClosestSnapshot(others, curr.ts - 24*60*60*1000, 3*60*60*1000) : null;
+
+  const dShort = diffSnapshots(curr, shortRef);
+  const d24h  = (prev24h && prev24h.ts !== shortRef?.ts) ? diffSnapshots(curr, prev24h) : null;
 
   document.getElementById('changeBadge').textContent = `누적 ${hist.length}건`;
   const box = document.getElementById('changeBox');
-  if (!dScan && !d24h) {
-    box.innerHTML = `<div class="empty" style="padding:14px"><div class="empty-icon">📭</div><div>2회 이상 스캔 후 비교가 표시됩니다</div></div>`;
+  if (!dShort && !d24h) {
+    box.innerHTML = `<div class="empty" style="padding:14px"><div class="empty-icon">📭</div><div>최소 20분 이상 누적되면 비교가 표시됩니다</div></div>`;
   } else {
     box.innerHTML = [
-      renderChangeBlock('🔄 직전 스캔 대비', dScan),
+      renderChangeBlock('🔄 단기 변화 (≈1시간 전 대비)', dShort),
       d24h ? `<div style="height:1px;background:var(--bd);margin:10px 0"></div>${renderChangeBlock('🕐 24시간 전 대비', d24h)}` : ''
     ].join('');
   }
@@ -1031,7 +1041,7 @@ function buildChangeSummary(regimeData, topCandidates) {
     if (d.movers.length) bits.push(`변동: ${d.movers.slice(0,3).map(m=>`${m.sym.replace('USDT','')}${m.delta>0?'+':''}${m.delta}`).join(',')}`);
     return bits.length ? `${label}: ${bits.join(' / ')}` : `${label}: 변화 없음`;
   }
-  return [toText('직전 스캔 대비', dScan), toText('24시간 전 대비', d24h)].filter(Boolean).join('\n');
+  return [toText('단기(≈1시간 전) 대비', dShort), toText('24시간 전 대비', d24h)].filter(Boolean).join('\n');
 }
 
 /* ═══════════════════════════════════════════
