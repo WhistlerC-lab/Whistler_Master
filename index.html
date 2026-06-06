@@ -1202,23 +1202,57 @@ function buildReport(regimeData, macroCoins, topCandidates, aiSummary, changeTex
     msg += `\n📊 <b>변화 요약</b>\n<code>${changeText}</code>\n`;
   }
 
-  if (aiSummary) {
-    msg += `\n🤖 <b>AI 종합 결론</b>\n${aiSummary.slice(0,600)}`;
-    if (aiSummary.length > 600) msg += '…';
-    msg += '\n';
-  }
-
   const intervalMin = document.getElementById('scanInterval').value;
-  msg += `\n⏰ 다음 스캔: ${intervalMin}분 후`;
-  return msg;
+  const head = msg + `\n⏰ 다음 스캔: ${intervalMin}분 후`;
+  const full = aiSummary
+    ? msg + `\n🤖 <b>AI 종합 결론</b>\n${aiSummary}\n` + `\n⏰ 다음 스캔: ${intervalMin}분 후`
+    : head;
+  return { head, full };
 }
+
+// 텔레그램 sendMessage는 메시지당 최대 4096자 제한 → 긴 텍스트는 줄바꿈 단위로 나눠서 순차 전송
+function chunkText(text, maxLen = 3500) {
+  const lines = text.split('\n');
+  const chunks = [];
+  let cur = '';
+  for (const line of lines) {
+    if ((cur + '\n' + line).length > maxLen && cur) {
+      chunks.push(cur);
+      cur = line;
+    } else {
+      cur = cur ? cur + '\n' + line : line;
+    }
+  }
+  if (cur) chunks.push(cur);
+  return chunks;
+}
+
+const TG_LIMIT = 4096;
 
 async function sendReport(regimeData, macroCoins, topCandidates, aiSummary, changeText) {
   if (!document.getElementById('tgAutoCb').checked) return;
-  const msg = buildReport(regimeData, macroCoins, topCandidates, aiSummary, changeText);
-  document.getElementById('reportPreview').textContent = msg;
+  const { head, full } = buildReport(regimeData, macroCoins, topCandidates, aiSummary, changeText);
+  let preview;
+
+  if (full.length <= TG_LIMIT) {
+    // 전체가 길이 제한 이내 → 한 메시지로 전송
+    preview = full;
+    await sendTelegram(full);
+  } else {
+    // 길이 제한 초과 → 본문(레짐/후보/변화요약)은 그대로, AI 종합 결론만 줄바꿈 단위로 나눠 이어서 전송
+    preview = head;
+    await sendTelegram(head);
+    const chunks = chunkText(aiSummary, TG_LIMIT - 200);
+    for (let i = 0; i < chunks.length; i++) {
+      const label = chunks.length > 1 ? `🤖 <b>AI 종합 결론 (${i+1}/${chunks.length})</b>\n` : `🤖 <b>AI 종합 결론</b>\n`;
+      const part = label + chunks[i];
+      preview += '\n\n' + part;
+      await sendTelegram(part);
+    }
+  }
+
+  document.getElementById('reportPreview').textContent = preview;
   document.getElementById('reportPreview').classList.add('show');
-  await sendTelegram(msg);
 }
 
 /* ═══════════════════════════════════════════
