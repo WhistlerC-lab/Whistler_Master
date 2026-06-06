@@ -186,6 +186,7 @@
       <div class="form-row">
         <label>스캔 간격</label>
         <select class="form-select" id="scanInterval">
+          <option value="15">15분마다</option>
           <option value="30">30분마다</option>
           <option value="60">1시간마다</option>
           <option value="120">2시간마다</option>
@@ -605,6 +606,50 @@ function fmtP(p) { return p>=1000?p.toFixed(1):p>=1?p.toFixed(3):p.toFixed(5); }
 function pct(entry,target) { return ((Math.abs(target-entry)/entry)*100).toFixed(1)+'%'; }
 
 /* ═══════════════════════════════════════════
+   POSITIONING (Net Long / 계좌비율)  — Terminal v1.8 logic
+═══════════════════════════════════════════ */
+const POS_CFG = { TREND_WIN: 5, POS_LIMIT: 30, NETLONG_RISE: 0.005, ACCT_FALL: -0.005 };
+
+function pctTrend(arr, win) {
+  const v = arr.filter(x => x != null && isFinite(x));
+  if (v.length < win*2) return null;
+  const recent = v.slice(-win).reduce((s,x)=>s+x,0)/win;
+  const earlier = v.slice(-win*2,-win).reduce((s,x)=>s+x,0)/win;
+  if (!earlier) return null;
+  return (recent-earlier)/Math.abs(earlier);
+}
+
+function checkPositioning(oiHist, posRatio, acctRatio) {
+  let netlong_up=null, acct_down=null, netLongChg=null, acctChg=null;
+  try {
+    const oiVal=(oiHist||[]).map(x=>+x.sumOpenInterestValue);
+    const longFrac=(posRatio||[]).map(x=>+x.longAccount);
+    const n=Math.min(oiVal.length,longFrac.length);
+    if (n>=POS_CFG.TREND_WIN*2) {
+      const est=[];
+      for (let k=0;k<n;k++) est.push(oiVal[oiVal.length-n+k]*longFrac[longFrac.length-n+k]);
+      netLongChg=pctTrend(est,POS_CFG.TREND_WIN);
+    }
+    netlong_up = netLongChg==null ? null : netLongChg>POS_CFG.NETLONG_RISE;
+    const lsr=(acctRatio||[]).map(x=>+x.longShortRatio);
+    acctChg=pctTrend(lsr,POS_CFG.TREND_WIN);
+    acct_down = acctChg==null ? null : acctChg<POS_CFG.ACCT_FALL;
+  } catch(e){}
+  return { netlong_up, acct_down, netLongChg, acctChg };
+}
+
+async function fetchPositioning(symbol, period='4h') {
+  try {
+    const [oiHist, posRatio, acctRatio] = await Promise.all([
+      fetchJSON(`${FAPI}/futures/data/openInterestHist?symbol=${symbol}&period=${period}&limit=${POS_CFG.POS_LIMIT}`),
+      fetchJSON(`${FAPI}/futures/data/topLongShortPositionRatio?symbol=${symbol}&period=${period}&limit=${POS_CFG.POS_LIMIT}`),
+      fetchJSON(`${FAPI}/futures/data/globalLongShortAccountRatio?symbol=${symbol}&period=${period}&limit=${POS_CFG.POS_LIMIT}`)
+    ]);
+    return checkPositioning(oiHist, posRatio, acctRatio);
+  } catch(e) { return { netlong_up:null, acct_down:null }; }
+}
+
+/* ═══════════════════════════════════════════
    STAGE 1 TF SCORING  (Terminal v1.8 logic)
 ═══════════════════════════════════════════ */
 const TF_SCORE = { '1h':2, '4h':4 };
@@ -712,15 +757,26 @@ async function scanCoins() {
     const batch = passed.slice(i, i+BATCH);
     await Promise.all(batch.map(async ({ sym, price, chg, k1h, k4h, tf1h, tf4h }) => {
       try {
-        const k1d = await fetchJSON(`${FAPI}/fapi/v1/klines?symbol=${sym}&interval=1d&limit=300`);
+        const [k1d, pos] = await Promise.all([
+          fetchJSON(`${FAPI}/fapi/v1/klines?symbol=${sym}&interval=1d&limit=300`),
+          fetchPositioning(sym, '4h')
+        ]);
         const c1d = parseK(k1d), c1h = parseK(k1h), c4h = parseK(k4h);
         const t1d = evaluateTrend(c1d), t4h = evaluateTrend(c4h), t1h = evaluateTrend(c1h);
         const sc = deepScore(t1d, t4h, t1h, regimeScore);
         const tfScore = calcTfScore(tf1h.stage1, tf4h.stage1);
-        const finalScore = Math.round(sc.lsc * 0.7 + tfScore * 3);
+
+        // 포지셔닝 보너스 — 스마트머니 다이버전스 (Net Long↑ + 계좌비율↓)
+        let posBonus = 0;
+        if (pos.netlong_up && pos.acct_down) posBonus = 25;       // 완전 다이버전스 — 큰손 매집 + 개미 이탈
+        else if (pos.netlong_up) posBonus = 10;                    // 큰손 매집만
+        else if (pos.acct_down)  posBonus = 5;                     // 개미 이탈만
+
+        const lscAdj = sc.lsc + posBonus;
+        const finalScore = Math.round(lscAdj * 0.7 + tfScore * 3);
         const atr1d = t1d?.atr || 0;
         const tpsl = atr1d > 0 ? calcTpSl(price, atr1d, 'long') : null;
-        results.push({ sym, price, chg, lsc: sc.lsc, ssc: sc.ssc, finalScore, tfScore, tf1h: tf1h.stage1, tf4h: tf4h.stage1, t1h, t4h, t1d, atr1d, tpsl });
+        results.push({ sym, price, chg, lsc: lscAdj, ssc: sc.ssc, finalScore, tfScore, posBonus, pos, tf1h: tf1h.stage1, tf4h: tf4h.stage1, t1h, t4h, t1d, atr1d, tpsl });
       } catch(e) {}
     }));
     setProgress(50 + ((i+BATCH)/passed.length)*35, `심층 분석: ${Math.min(i+BATCH, passed.length)}/${passed.length}`);
@@ -806,6 +862,11 @@ function renderCandidates(results) {
           ${r.tf4h?'<span class="tf-badge tf-ok">4H✅</span>':''}
           ${!r.tf1h&&!r.tf4h?'<span class="tf-badge" style="color:var(--tx3)">—</span>':''}
         </div>
+        <div class="tf-badges" style="margin-top:3px">
+          ${r.posBonus>=25?'<span class="tf-badge" style="background:rgba(167,139,250,.15);color:var(--purple);border:1px solid rgba(167,139,250,.3)">🐳 매집+이탈</span>':
+            r.pos?.netlong_up?'<span class="tf-badge tf-half">🐳 매집</span>':
+            r.pos?.acct_down?'<span class="tf-badge tf-half">👤 이탈</span>':''}
+        </div>
       </td>
       <td class="tpsl-cell">
         ${tpsl?`<span class="tpsl-tp">TP1 $${fmtP(tpsl.tp1)} (+${pct(r.price,tpsl.tp1)})</span><br>
@@ -835,9 +896,10 @@ async function generateAISummary(regimeData, macroCoins, topCandidates) {
 
   const top5 = topCandidates.filter(r=>r.lsc>10).slice(0,5);
   const regLabel = regimeData ? (regimeData.score<=-30?'하락장(BEAR)':regimeData.score>=30?'상승장(BULL)':'박스권(NEUTRAL)') : '불명';
-  const candLines = top5.map((r,i) =>
-    `${i+1}. ${r.sym.replace('USDT','')} — 점수:${r.finalScore}pt | RSI:${r.t1d?.rsi?.toFixed(1)||'?'} | ${r.tf1h?'1H✅':'1H❌'} ${r.tf4h?'4H✅':'4H❌'} | TP1:+${r.tpsl?pct(r.price,r.tpsl.tp1):'?'} SL:-${r.tpsl?pct(r.price,r.tpsl.sl):'?'}`
-  ).join('\n');
+  const candLines = top5.map((r,i) => {
+    const posTxt = r.posBonus>=25 ? '🐳매집+개미이탈(강한 다이버전스)' : r.pos?.netlong_up ? '🐳큰손 매집중' : r.pos?.acct_down ? '👤개미 이탈중' : '포지셔닝 중립';
+    return `${i+1}. ${r.sym.replace('USDT','')} — 점수:${r.finalScore}pt | RSI:${r.t1d?.rsi?.toFixed(1)||'?'} | ${r.tf1h?'1H✅':'1H❌'} ${r.tf4h?'4H✅':'4H❌'} | ${posTxt} | TP1:+${r.tpsl?pct(r.price,r.tpsl.tp1):'?'} SL:-${r.tpsl?pct(r.price,r.tpsl.sl):'?'}`;
+  }).join('\n');
 
   const btcInfo = macroCoins.find(c=>c.sym==='BTC');
   const ethInfo = macroCoins.find(c=>c.sym==='ETH');
