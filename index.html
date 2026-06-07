@@ -302,6 +302,17 @@
       </div>
     </div>
 
+    <!-- News headlines -->
+    <div>
+      <div class="section-hd">
+        <h2>📰 실시간 뉴스</h2>
+        <div class="badge" id="newsBadge">—</div>
+      </div>
+      <div style="background:var(--bg2);border:1px solid var(--bd);border-radius:8px;padding:4px 14px" id="newsBox">
+        <div class="empty" style="padding:20px"><div class="empty-icon">📰</div><div>최근 1~2시간 내 주요 뉴스 헤드라인을 불러옵니다 (5분마다 자동 갱신)</div></div>
+      </div>
+    </div>
+
     <!-- Change summary -->
     <div>
       <div class="section-hd">
@@ -387,10 +398,14 @@
   <div class="modal" style="width:480px">
     <div class="modal-title">🤖 코인 Q&A <span id="qnaSymTitle" style="color:var(--purple)"></span> <span class="modal-close" onclick="closeCoinQna()">✕</span></div>
     <div style="font-size:11px;color:var(--tx3);margin-bottom:8px" id="qnaContextSummary"></div>
-    <div id="qnaHistory" style="max-height:260px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;margin-bottom:10px"></div>
+    <div id="qnaHistory" style="max-height:220px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;margin-bottom:10px"></div>
+    <!-- 프리셋 질문 칩 -->
+    <div style="margin-bottom:8px">
+      <div style="font-size:10px;color:var(--tx3);margin-bottom:5px;letter-spacing:.04em;text-transform:uppercase">빠른 질문 선택</div>
+      <div id="qnaPresetChips" style="display:flex;flex-wrap:wrap;gap:5px"></div>
+    </div>
     <div class="form-row">
-      <label>질문</label>
-      <textarea id="qnaInput" rows="2" placeholder="예: 이 코인 지금 진입해도 될까? RSI는 괜찮아 보여?" style="width:100%;background:var(--bg1);border:1px solid var(--bd);border-radius:6px;color:var(--tx1);padding:8px;font-size:12px;resize:vertical;font-family:inherit"></textarea>
+      <textarea id="qnaInput" rows="2" placeholder="질문을 직접 입력하거나 위에서 선택하세요" style="width:100%;background:var(--bg1);border:1px solid var(--bd);border-radius:6px;color:var(--tx1);padding:8px;font-size:12px;resize:vertical;font-family:inherit"></textarea>
     </div>
     <div style="display:flex;gap:8px;margin-top:4px">
       <button class="btn primary" style="flex:1" onclick="submitCoinQna()" id="qnaSubmitBtn">질문하기</button>
@@ -480,18 +495,102 @@ let qnaChat = []; // [{role:'user'|'ai', text}]
 
 function buildCoinQnaContext(r) {
   if (!r) return null;
-  const posTxt = r.posBonus>=25 ? '🐳 매집+개미이탈(강한 다이버전스)' : r.pos?.netlong_up ? '🐳 큰손 매집중' : r.pos?.acct_down ? '👤 개미 이탈중' : '포지셔닝 중립';
-  const cvdTxt = r.t1h ? (r.t1h.cvdEmaCur > r.t1h.cvdEmaPrev ? 'CVD 상승(매수세 우위)' : 'CVD 하락(매도세 우위)') : '데이터 없음';
-  const lines = [
-    `심볼: ${r.sym.replace('USDT','')} (현재가 $${fmtP(r.price)}, 24h ${r.chg>=0?'+':''}${r.chg.toFixed(2)}%)`,
-    `종합 점수: ${r.finalScore}pt (롱 신호 ${r.lsc}pt)`,
-    `RSI(1D): ${r.t1d?.rsi?.toFixed(1)||'?'}`,
-    `타임프레임 정렬: ${tfSummaryText(r)}${r.tf15m ? ` | ${r.tf15m.label}` : ''}`,
-    `포지셔닝 신호: ${posTxt}`,
-    `1H 체결 흐름: ${cvdTxt}, 매수 체결비중 ${r.t1h?.buyRatio!=null?Math.round(r.t1h.buyRatio*100)+'%':'?'}`,
-    r.tpsl ? `제안 TP/SL (10x 기준): TP1 $${fmtP(r.tpsl.tp1)}(+${pct(r.price,r.tpsl.tp1)}), SL $${fmtP(r.tpsl.sl)}(−${pct(r.price,r.tpsl.sl)}), RRR ${r.tpsl.rrr1}` : ''
-  ].filter(Boolean);
-  return lines.join('\n');
+
+  // ─── 포지셔닝 신호 ───
+  const posTxt = r.posBonus >= 25
+    ? '🐳 강한 다이버전스 — 큰손 넷롱 증가 + 개인 계좌비율 동시 감소 (매집 가능성 높음)'
+    : r.pos?.netlong_up
+      ? '🐳 큰손(넷롱) 증가 중 — 기관/세력 매집 가능성'
+      : r.pos?.acct_down
+        ? '👤 개인 계좌비율 감소 — 개미 이탈 신호 (상승 선행지표로 해석 가능)'
+        : '⚪ 포지셔닝 중립 — 뚜렷한 다이버전스 없음';
+
+  // ─── 타임프레임별 풀 데이터 텍스트화 ───
+  const tfDetail = tf => {
+    const t = r[`t${tf}`];
+    if (!t) return null;
+    const emaAlign = t.c > t.e200 && t.e50 > t.e200 ? '정배열(상승추세)' : t.c < t.e200 ? '역배열(하락추세)' : '부분 정배열';
+    const macdDir = t.macdHist > 0 && t.macdHist > t.prevMacdHist ? '상향 확장(강세)' :
+                    t.macdHist > 0 && t.macdHist <= t.prevMacdHist ? '양수이나 수렴(모멘텀 둔화)' :
+                    t.macdHist < 0 && t.macdHist < t.prevMacdHist ? '하향 확장(약세)' : '음수이나 수렴(낙폭 둔화)';
+    const cvdDir = t.cvdEmaCur > t.cvdEmaPrev ? '상승(매수세 우위)' : '하락(매도세 우위)';
+    const divTxt = t.bullDiv && t.bearDiv ? '강세+약세 다이버전스 동시' : t.bullDiv ? '✅ RSI 강세 다이버전스 감지' : t.bearDiv ? '⚠️ RSI 약세 다이버전스 감지' : '다이버전스 없음';
+    const bbw = t.bbwExp ? '밴드폭 확대 중(변동성 증가)' : '밴드폭 수축(변동성 축소)';
+    return [
+      `  EMA 배열: ${emaAlign} | RSI: ${t.rsi?.toFixed(1)||'?'}`,
+      `  MACD 히스토그램: ${macdDir}`,
+      `  CVD 흐름: ${cvdDir} | 체결 매수비중: ${t.buyRatio!=null?Math.round(t.buyRatio*100)+'%':'?'}`,
+      `  ${divTxt} | 볼린저밴드: ${bbw}`
+    ].join('\n');
+  };
+
+  const atrPct = r.atr1d && r.price ? ((r.atr1d / r.price)*100).toFixed(2) : null;
+
+  const sections = [
+    `▶ 기본 정보`,
+    `  심볼: ${r.sym.replace('USDT','')} | 현재가: $${fmtP(r.price)} | 24H 등락률: ${r.chg>=0?'+':''}${r.chg.toFixed(2)}%`,
+    `  종합 점수: ${r.finalScore}pt (롱 신호 ${r.lsc}pt) | TF 정렬: ${tfSummaryText(r)}${r.tf15m ? ` | ${r.tf15m.label}` : ''}`,
+    `  시장 레짐 점수(BTC 기반): ${regimeScore != null ? regimeScore + 'pt' : '—'} (음수=하락장 불리, 양수=상승장 유리)`,
+    ``,
+    `▶ 1D (일봉) 트렌드`,
+    tfDetail('1d') || '  데이터 없음',
+    ``,
+    `▶ 4H 트렌드`,
+    tfDetail('4h') || '  데이터 없음',
+    ``,
+    `▶ 1H 트렌드`,
+    tfDetail('1h') || '  데이터 없음',
+    ``,
+    `▶ 포지셔닝 & 세력 신호`,
+    `  ${posTxt}`,
+    ``,
+    `▶ 변동성 & TP/SL 제안`,
+    `  ATR(1D): $${r.atr1d ? fmtP(r.atr1d) : '?'}${atrPct ? ` (현재가 대비 ${atrPct}%)` : ''}`,
+    r.tpsl
+      ? `  TP1: $${fmtP(r.tpsl.tp1)} (+${pct(r.price,r.tpsl.tp1)}) | TP2: $${fmtP(r.tpsl.tp2)} (+${pct(r.price,r.tpsl.tp2)}) | SL: $${fmtP(r.tpsl.sl)} (−${pct(r.price,r.tpsl.sl)}) | RRR: ${r.tpsl.rrr1}:1`
+      : '  ATR 데이터 부족으로 TP/SL 산출 불가'
+  ];
+
+  return sections.join('\n');
+}
+
+/* ─── Q&A 프리셋 질문 목록 ─── */
+const QNA_PRESETS = [
+  { icon:'🎯', label:'진입 타이밍',
+    text:'지금 이 코인을 진입하기에 적절한 타이밍인가? 현재 가격대 대비 최적 진입 구간과 근거를 1D/4H 관점에서 분석해줘.' },
+  { icon:'📊', label:'종합 셋업 평가',
+    text:'이 코인의 스윙 롱 셋업을 종합 평가해줘. 강점(매수 근거 3가지)과 약점(리스크 요인 2가지)을 구분해서 설명하고, 전체적으로 B급/A급/S급 중 어느 수준의 셋업인지 판단해줘.' },
+  { icon:'🛡️', label:'TP/SL 전략',
+    text:'제시된 TP/SL 구간을 기반으로 실제 진입 전략을 구체적으로 알려줘. 분할 진입이 유리한지, 1차/2차 TP를 어떻게 활용하면 좋을지, SL 이하로 내려갈 경우 재진입 조건은 무엇인지 알려줘.' },
+  { icon:'🐳', label:'세력/CVD 분석',
+    text:'CVD 흐름과 포지셔닝 신호(넷롱·계좌비율)를 종합해서, 현재 세력 개입 가능성을 평가해줘. 매집 국면인지, 분산 국면인지, 또는 단기 펌핑 후 정리 가능성이 있는지 의견을 줘.' },
+  { icon:'⚠️', label:'무효화 조건',
+    text:'이 롱 셋업이 무효화(invalidation)되는 조건이 뭐야? 구체적인 가격 레벨 또는 지표 신호 기준으로 "이 상황이 오면 롱을 포기해야 한다"는 기준을 명확히 알려줘.' },
+  { icon:'📐', label:'지지·저항 구간',
+    text:'현재 가격 기준으로 주요 지지 구간(TP/SL 포함)과 저항 구간을 EMA, ATR, 스윙 포인트 관점에서 설명해줘. 단기(1H)/중기(4H)/장기(1D) 구간을 구분해서 알려줘.' },
+  { icon:'🔄', label:'눌림목 vs 즉시진입',
+    text:'지금 즉시 진입하는 것과 눌림목을 기다리는 것 중 어느 쪽이 나을까? 기다린다면 어느 가격대까지 내려올 수 있고, 그 구간이 지지로 유효한 이유는 뭔지 설명해줘.' },
+  { icon:'📉', label:'변동성 & 레버리지',
+    text:`ATR 기준으로 이 종목의 변동성 수준이 어떤지 평가해줘. 스윙 거래에서 레버리지를 어느 수준으로 설정하는 게 적합하고, 증거금 관리는 어떻게 하면 좋을지 구체적으로 알려줘.` },
+];
+
+function fillQnaPreset(text) {
+  const input = document.getElementById('qnaInput');
+  if (!input) return;
+  input.value = text;
+  input.focus();
+  input.setSelectionRange(text.length, text.length);
+}
+
+function renderQnaPresets() {
+  const container = document.getElementById('qnaPresetChips');
+  if (!container) return;
+  container.innerHTML = QNA_PRESETS.map((p, i) =>
+    `<button onclick="fillQnaPreset(QNA_PRESETS[${i}].text)" style="font-size:10px;padding:4px 8px;background:var(--bg3);border:1px solid var(--bd);border-radius:12px;color:var(--tx2);cursor:pointer;white-space:nowrap;transition:border-color .15s"
+      onmouseover="this.style.borderColor='var(--purple)';this.style.color='var(--purple)'"
+      onmouseout="this.style.borderColor='var(--bd)';this.style.color='var(--tx2)'"
+    >${p.icon} ${p.label}</button>`
+  ).join('');
 }
 
 function openCoinQna(sym) {
@@ -503,6 +602,7 @@ function openCoinQna(sym) {
   document.getElementById('qnaContextSummary').textContent = `현재가 $${fmtP(r.price)} | 점수 ${r.finalScore}pt | RSI ${r.t1d?.rsi?.toFixed(1)||'?'} | ${tfSummaryText(r)}${r.tf15m ? ` ${r.tf15m.label}` : ''} — 위 데이터를 바탕으로 자유롭게 질문해보세요.`;
   document.getElementById('qnaInput').value = '';
   renderQnaHistory();
+  renderQnaPresets();
   document.getElementById('qnaModal').classList.add('show');
 }
 function closeCoinQna() {
@@ -547,14 +647,27 @@ async function submitCoinQna() {
 
   const ctxText = buildCoinQnaContext(r);
   const histLines = qnaChat.slice(0, -2).map(m => `${m.role==='user'?'사용자':'AI'}: ${m.text}`).join('\n');
-  const prompt = `당신은 가상화폐 스윙트레이딩 전문 애널리스트입니다. 아래는 특정 코인의 현재 스캔 데이터입니다. 이 데이터를 근거로 사용자의 질문에 한국어로 직관적이고 간결하게 답변해주세요. 데이터에 없는 내용은 추측하지 말고 "데이터에 없음"이라고 답하세요.
+  const prompt = `당신은 가상화폐 선물 스윙트레이딩 전문 애널리스트입니다. 아래 스캔 데이터를 바탕으로 사용자의 질문에 한국어로 답변하세요.
 
-## 코인 데이터 (${qnaCurSym.replace('USDT','')})
+## 역할 & 답변 원칙
+- 데이터 기반 분석가: 제공된 수치와 지표만을 근거로 판단하며, 데이터에 없는 정보는 추측하지 않고 "데이터 없음"으로 명시합니다.
+- 실전 트레이더 관점: "좋을 수도 있다"는 식의 모호한 표현 대신, 구체적인 가격 레벨·조건·행동 지침을 제시합니다.
+- 균형 잡힌 시각: 매수 근거와 리스크 요인을 동시에 제시하고, 최종 의견은 명확하게 결론 짓습니다.
+- 간결성: 핵심만 전달합니다. 필요시 번호 목록·굵은 글씨로 구조화하되, 불필요한 서론·면책 문구는 생략합니다.
+
+## 스캔 데이터 — ${qnaCurSym.replace('USDT','')} (${new Date().toLocaleString('ko')})
 ${ctxText}
 
-${histLines ? `## 이전 대화\n${histLines}\n` : ''}
+${histLines ? `## 이전 대화 맥락\n${histLines}\n` : ''}
 ## 사용자 질문
-${q}`;
+${q}
+
+## 답변 형식 지침
+질문 유형에 따라 아래 형식을 참고하세요.
+- 진입 타이밍/가격 질문: 근거 → 진입 구간 제시 → 조건부 판단 순서로
+- 종합 평가 질문: 강점 / 약점 / 종합 등급(A/B/C급) 구조로
+- TP/SL 질문: 구체적 가격 + % + RRR 수치 중심으로
+- 리스크/무효화 질문: "이 가격/이 조건이 오면 → 어떻게 행동한다" 형식으로`;
 
   const result = await callGemini(prompt);
   qnaChat.pop(); // "분석 중..." 제거
@@ -1177,6 +1290,84 @@ async function refreshOrderFlow() {
   } catch (e) {
     grid.innerHTML = `<div class="empty"><div class="empty-icon">⚠</div><div>주문흐름 조회 실패</div></div>`;
   }
+}
+
+/* ═══════════════════════════════════════════
+   NEWS HEADLINES (실시간 뉴스)
+   — CryptoPanic/CoinGecko News는 무료 API키 없이는 접근 불가(둘 다 유료/키 필요로 전환)라
+     키 없이 호출 가능한 CoinDesk Data News API(구 CryptoCompare)를 사용
+═══════════════════════════════════════════ */
+const NEWS_API = 'https://data-api.coindesk.com/news/v1/article/list';
+const NEWS_REFRESH_MS = 5 * 60 * 1000;        // 5분마다 자동 갱신
+const NEWS_WINDOW_MS = 2 * 60 * 60 * 1000;    // 발행 후 2시간 이내 기사만 "최근 뉴스"로 표시
+let newsTimer = null;
+
+// 발행 시각(unix seconds) → "N분 전 / N시간 전" 상대 시간 표기
+function timeAgo(unixSec) {
+  const diffMin = Math.floor((Date.now()/1000 - unixSec) / 60);
+  if (diffMin < 1) return '방금 전';
+  if (diffMin < 60) return `${diffMin}분 전`;
+  return `${Math.floor(diffMin/60)}시간 ${diffMin%60}분 전`;
+}
+
+async function loadNews() {
+  const box = document.getElementById('newsBox');
+  const badge = document.getElementById('newsBadge');
+  try {
+    const data = await fetchJSON(`${NEWS_API}?lang=EN&limit=30`);
+    const now = Date.now();
+    const items = (data?.Data || [])
+      .filter(a => a.PUBLISHED_ON && (now - a.PUBLISHED_ON*1000) <= NEWS_WINDOW_MS)
+      .sort((a,b) => b.PUBLISHED_ON - a.PUBLISHED_ON)
+      .slice(0, 20);
+
+    if (!items.length) {
+      box.innerHTML = `<div class="empty" style="padding:20px"><div class="empty-icon">📰</div><div>최근 2시간 내 새로 올라온 헤드라인이 없습니다 (5분마다 자동 갱신)</div></div>`;
+      badge.textContent = `${new Date().toLocaleTimeString('ko')} 확인 · 신규 없음`;
+      return;
+    }
+
+    const sentDot = s => s === 'POSITIVE' ? '🟢' : s === 'NEGATIVE' ? '🔴' : '⚪';
+    const NEWS_SHOWN = 2; // 대표로 먼저 보여줄 개수 — 나머지는 접어두고 클릭 시 펼침
+    const renderItem = (a, i, lastIdx) => `
+      <a href="${a.URL}" target="_blank" rel="noopener noreferrer" style="display:block;padding:9px 2px;text-decoration:none;color:inherit;${i < lastIdx ? 'border-bottom:1px solid rgba(42,48,80,.4)' : ''}">
+        <div style="font-size:12px;color:var(--tx1);line-height:1.5">${sentDot(a.SENTIMENT)} ${a.TITLE}</div>
+        <div style="font-size:10px;color:var(--tx3);margin-top:3px;display:flex;gap:8px;flex-wrap:wrap">
+          <span>${a.SOURCE_DATA?.NAME || a.SOURCE_DATA?.SOURCE_KEY || '—'}</span>
+          <span>· ${timeAgo(a.PUBLISHED_ON)}</span>
+        </div>
+      </a>`;
+
+    const head = items.slice(0, NEWS_SHOWN);
+    const rest = items.slice(NEWS_SHOWN);
+    const headHtml = head.map((a, i) => renderItem(a, i, head.length - (rest.length ? 0 : 1))).join('');
+    const restHtml = rest.length
+      ? `<div id="newsMore" style="display:none;border-top:1px solid rgba(42,48,80,.4)">${rest.map((a, i) => renderItem(a, i, rest.length - 1)).join('')}</div>
+         <button class="btn" id="newsMoreBtn" onclick="toggleNewsMore()" style="width:100%;margin:8px 0;font-size:11px;padding:6px">▾ 나머지 ${rest.length}건 더 보기</button>`
+      : '';
+    box.innerHTML = headHtml + restHtml;
+    badge.textContent = `최근 2시간 ${items.length}건 · ${new Date().toLocaleTimeString('ko')} 갱신 (5분마다)`;
+  } catch (e) {
+    box.innerHTML = `<div class="empty" style="padding:20px"><div class="empty-icon">⚠</div><div>뉴스 조회 실패 (${e.message})</div></div>`;
+    badge.textContent = '오류';
+  }
+}
+
+// 대표 헤드라인 2건만 우선 노출하고, 나머지는 버튼 클릭으로 펼치기/접기 토글
+function toggleNewsMore() {
+  const more = document.getElementById('newsMore');
+  const btn = document.getElementById('newsMoreBtn');
+  if (!more || !btn) return;
+  const opening = more.style.display === 'none';
+  more.style.display = opening ? 'block' : 'none';
+  const n = more.querySelectorAll('a').length;
+  btn.textContent = opening ? `▴ 접기` : `▾ 나머지 ${n}건 더 보기`;
+}
+
+function startNewsLive() {
+  if (newsTimer) clearInterval(newsTimer);
+  loadNews();
+  newsTimer = setInterval(loadNews, NEWS_REFRESH_MS);
 }
 
 /* ═══════════════════════════════════════════
@@ -2043,6 +2234,7 @@ function stopScan() { stopFlag = true; stopAutoScan(); }
 loadTgSettings();
 fetchFxRate();
 setInterval(fetchFxRate, 30 * 60 * 1000); // 30분마다 환율 갱신
+startNewsLive(); // 스캔 주기와 무관하게 5분마다 독립 갱신
 log('WHISTLER MASTER 시작');
 </script>
 </body>
