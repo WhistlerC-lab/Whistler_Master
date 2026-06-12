@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>WHISTLER MASTER v1.0</title>
+<title>WHISTLER MASTER v1.1</title>
 <style>
   :root {
     --bg0: #0a0c12; --bg1: #0f1117; --bg2: #161926; --bg3: #1e2438;
@@ -164,7 +164,7 @@
 
 <!-- HEADER -->
 <div class="header">
-  <div class="logo">WHISTLER MASTER <span>v1.0</span></div>
+  <div class="logo">WHISTLER MASTER <span>v1.1</span></div>
   <div class="regime-pill rp-neut" id="hRegime">—</div>
   <span style="font-size:11px;color:var(--tx3)" id="hRegimeScore"></span>
   <span style="font-size:11px;color:var(--tx3);margin-left:8px;padding:3px 10px;border-radius:20px;background:rgba(255,255,255,.04);border:1px solid var(--bd)" id="hFxRate">💱 환율 로딩중…</span>
@@ -2323,6 +2323,20 @@ function journalRecord(topCandidates, regimeData) {
     const ext1h = (t1h && atr1h) ? +(((t1h.c - t1h.e12) / atr1h).toFixed(2)) : null;
     const ext1d = (t1d && atr1d) ? +(((t1d.c - t1d.e12) / atr1d).toFixed(2)) : null;
 
+    // v1.1: deepScore 점수 컴포넌트 분해 기록 — 신호 산출/점수/필터/TPSL에는 영향 없음 (저널 피처 추가만).
+    // 목적: finalScore와 성과의 상관이 거의 0으로 측정됨(2026-06-12 진단, n=69, corr≈-0.06)
+    //       → 7개 점수 항목 중 어떤 것이 노이즈인지 항목별 예측력 검증을 가능하게 함.
+    // 롤백: cmpTf 헬퍼와 f1d/f4h/f1h 세 필드 삭제 (구 레코드와 포맷 호환 — 필드 없는 레코드는 분석 시 null 처리)
+    const cmpTf = t => t ? {
+      e200:  t.c > t.e200,                                   // EMA200 위치 (배점 20)
+      align: t.e50 > t.e200,                                 // EMA50>200 (15)
+      macd:  t.macdHist > 0 && t.macdHist > t.prevMacdHist,  // MACD 히스토 상향 (15)
+      rsiZ:  t.rsi > 50 && t.rsi < 70,                       // RSI 롱 구간 (10)
+      cvd:   t.cvdEmaCur > t.cvdEmaPrev,                     // CVD EMA 방향 (10)
+      bDiv:  !!t.bullDiv, sDiv: !!t.bearDiv,                 // 다이버전스 (15)
+      bbw:   !!t.bbwExp                                      // BBW 확장 (5, 현재 롱·숏 양쪽 가산)
+    } : null;
+
     jrn.push({
       id: now + '_' + r.sym,
       ts: now, sym: r.sym, entry,
@@ -2335,6 +2349,7 @@ function journalRecord(topCandidates, regimeData) {
       ext1h, ext1d,
       regime: regimeData?.score ?? null,
       tfPass: r.tfPass || null,
+      f1d: cmpTf(t1d), f4h: cmpTf(r.t4h), f1h: cmpTf(t1h), // v1.1 (v1.0: 없음)
       // ── TP/SL 두 변형 ──
       atr1d, atr1h,
       v1: { sl: entry - atr1d, tp: entry + atr1d },
