@@ -1332,8 +1332,12 @@ async function loadNews() {
   const box = document.getElementById('newsBox');
   const badge = document.getElementById('newsBadge');
   try {
-    const data = await fetchJSON(`${NEWS_API}?lang=EN&limit=30`);
+    // 타겟 URL을 인코딩하여 프록시 서버(allorigins.win/raw)를 경유하도록 수정
+    const targetUrl = encodeURIComponent(`${NEWS_API}?lang=EN&limit=30`);
+    const data = await fetchJSON(`https://api.allorigins.win/raw?url=${targetUrl}`);
+    
     const now = Date.now();
+// ...
     const items = (data?.Data || [])
       .filter(a => a.PUBLISHED_ON && (now - a.PUBLISHED_ON*1000) <= NEWS_WINDOW_MS)
       .sort((a,b) => b.PUBLISHED_ON - a.PUBLISHED_ON)
